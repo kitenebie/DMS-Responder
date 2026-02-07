@@ -1,6 +1,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, StatusBar, ScrollView, StyleSheet, ActivityIndicator, Modal, Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import {
+  View,
+  Text,
+  Pressable,
+  StatusBar,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  Modal,
+  Alert,
+} from 'react-native';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
 import { Map } from './components/Map';
@@ -12,8 +21,9 @@ import { HistoryModal } from './components/HistoryModal';
 import { ReportForm } from './components/ReportForm';
 import { ActionBar } from './components/ActionBar';
 import { QuickAccess } from './components/QuickAccess';
+import { CameraCaptureModal } from './components/CameraCaptureModal';
 import { Icon } from './components/Icon';
-import { getCredentials, login } from './components/lib/auth';
+import { getCredentials, getStoredUser, login } from './components/lib/auth';
 import {
   fetchIncomingIncident,
   fetchChatMessages,
@@ -21,7 +31,7 @@ import {
   DEFAULT_CONFIG,
   STATUS_COLORS,
 } from './src/mockData';
-import { submitReportForm } from './components/lib/axios';
+import { submitReportForm, sendChatMessage } from './components/lib/axios';
 import { AppState, ReportForm as ReportFormType, IncidentStatus, Incident } from './src/types';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Background from 'Background';
@@ -55,6 +65,7 @@ export default function App() {
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
 
   // Auto-login on app start
   useEffect(() => {
@@ -81,39 +92,35 @@ export default function App() {
   useEffect(() => {
     const loadIncident = async () => {
       const incident = await fetchIncomingIncident();
-      
       // Check if the incident is a valid real incident (not "Unknown" defaults)
-      const isValidIncident = JSON.stringify(incident);
-      
       // If incident is already accepted, automatically set it as active and show on map
-      if (isValidIncident && incident.isAccepted) {
+      if (incident.id !== "0"  && incident.id !== "unknown" && incident.isAccepted === true && incident.isAccepted !== null) {
         setIncomingIncident(incident);
         setState((prev) => ({
           ...prev,
           activeIncident: incident,
-          currentStatus:
-            (incident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
+          currentStatus: (incident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
         }));
         return;
       }
-      
+
       setIncomingIncident(incident);
-      console.log(`is VALID: ${isValidIncident}`)
+      console.log(`is VALID: ${incident.id}`);
       // Show the modal when a valid incident is fetched and not yet accepted
-      if (isValidIncident && !incident.isAccepted) {
+      if (incident.id !== "0"  &&  incident.id !== "unknown" && incident.isAccepted === false) {
         setState((prev) => ({
           ...prev,
           showIncomingModal: true,
         }));
       }
     };
-    
+
     // Initial fetch
     loadIncident();
-    
+
     // Set up polling every 3 seconds
     const intervalId = setInterval(loadIncident, 3000);
-    
+
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
   }, []);
@@ -124,8 +131,7 @@ export default function App() {
       ...prev,
       showIncomingModal: false,
       activeIncident: incomingIncident,
-      currentStatus:
-        (incomingIncident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
+      currentStatus: (incomingIncident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
     }));
   }, [incomingIncident]);
 
@@ -217,37 +223,72 @@ export default function App() {
 
       if (!message.trim() && images.length === 0) return;
 
-      const reportTitle = state.activeIncident?.type ?? 'Incident';
+      // Get sender ID from stored user data
+      const userData = await getStoredUser();
+      const senderId = userData?.user?.id;
+      if (!senderId) {
+        console.warn('User ID not found for chat send');
+        return;
+      }
+
+      // Receiver ID would typically be the dispatcher or report owner
+      // For now, use a default or get from incident data
+      const receiverId = state.activeIncident?.user_id || 1; // Fallback to 1 if not available
 
       try {
+        // Send text message or first image
         if (images.length > 0) {
-          for (const imageUri of images) {
-            await addChatMessage(reportIdNum, {
-              report_id: reportIdNum,
-              name: reportTitle,
+          // Send message with first image
+          const response = await sendChatMessage({
+            report_id: reportIdNum,
+            sender_id: senderId,
+            receiver_id: receiverId,
+            message: message.trim() || 'Photo message',
+            image: images[0],
+          });
+
+          if (response.success && response.data) {
+            // Add sent message to local state
+            const newMessage = {
+              id: response.data.id || Date.now(),
+              sender: userData?.user?.firstName || 'You',
               message: message.trim() || 'Photo message',
-              sender: 'user',
-              timestamp: new Date().toISOString(),
-              image: imageUri,
-            });
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isUser: true,
+              image: images[0],
+            };
+            setState((prev) => ({
+              ...prev,
+              chatMessages: [...prev.chatMessages, newMessage],
+            }));
           }
         } else {
-          await addChatMessage(reportIdNum, {
+          // Send text-only message
+          const response = await sendChatMessage({
             report_id: reportIdNum,
-            name: reportTitle,
+            sender_id: senderId,
+            receiver_id: receiverId,
             message: message.trim(),
-            sender: 'user',
-            timestamp: new Date().toISOString(),
           });
-        }
 
-        const updatedChats = await fetchChatMessages(String(reportIdNum));
-        setState((prev) => ({
-          ...prev,
-          chatMessages: updatedChats,
-        }));
+          if (response.success && response.data) {
+            // Add sent message to local state
+            const newMessage = {
+              id: response.data.id || Date.now(),
+              sender: userData?.user?.firstName || 'You',
+              message: message.trim(),
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isUser: true,
+            };
+            setState((prev) => ({
+              ...prev,
+              chatMessages: [...prev.chatMessages, newMessage],
+            }));
+          }
+        }
       } catch (err) {
         console.warn('Failed to send message:', err);
+        Alert.alert('Error', 'Failed to send message. Please try again.');
       }
     },
     [state.activeIncident]
@@ -263,71 +304,41 @@ export default function App() {
     }));
   }, []);
 
-  const handleSubmitReport = useCallback(async () => {
-    try {
-      const incidentId = state.activeIncident?.id ?? undefined;
-      await submitReportForm(state.reportForm, photoUri, incidentId);
-      Alert.alert('Success', 'Report submitted successfully!');
-      
-      // Reset form after submission
-      setState((prev) => ({
-        ...prev,
-        reportForm: {
-          actionsTaken: '',
-          timeArrived: '',
-          timeCompleted: '',
-          additionalNotes: '',
-        },
-      }));
-      setPhotoUri(null);
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to submit report. Please try again.');
-    }
-  }, [state.reportForm, photoUri, state.activeIncident]);
+  const handleSubmitReport = useCallback(
+    async (payload: { form: ReportFormType; photoUri?: string | null }) => {
+      try {
+        const incidentId = state.activeIncident?.id ?? undefined;
+        await submitReportForm(payload.form, payload.photoUri ?? photoUri, incidentId);
+        Alert.alert('Success', 'Report submitted successfully!');
 
-  // Request camera permission
-  const requestCameraPermission = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Camera permission is required to take photos.');
-        return false;
+        // Reset form after submission
+        setState((prev) => ({
+          ...prev,
+          reportForm: {
+            actionsTaken: '',
+            timeArrived: '',
+            timeCompleted: '',
+            additionalNotes: '',
+          },
+        }));
+        setPhotoUri(null);
+      } catch (error: any) {
+        Alert.alert(
+          'Error',
+          error.response?.data?.message || 'Failed to submit report. Please try again.'
+        );
       }
-      return true;
-    } catch (error) {
-      console.error('Error checking camera permission:', error);
-      return false;
-    }
-  };
+    },
+    [photoUri, state.activeIncident]
+  );
 
-  // Take photo with camera
-  const handleTakePhoto = useCallback(async () => {
-    const hasPermission = await requestCameraPermission();
-    if (!hasPermission) return;
+  const handleTakePhoto = useCallback(() => {
+    setIsCameraOpen(true);
+  }, []);
 
-    try {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false, // Disabled to prevent crash on some Android devices
-        quality: 0.6, // Reduced quality for better compatibility
-        base64: false,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        if (uri) {
-          setPhotoUri(uri);
-        }
-      }
-    } catch (error: any) {
-      console.error('Error taking photo:', error);
-      // Handle specific error types
-      if (error.message && error.message.includes('canceled')) {
-        // User canceled, no action needed
-        return;
-      }
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
+  const handleCameraCaptured = useCallback((uri: string) => {
+    setPhotoUri(uri);
+    setIsCameraOpen(false);
   }, []);
 
   // Remove photo
@@ -347,9 +358,17 @@ export default function App() {
   if (isAutoLoggingIn) {
     return (
       <ThemeProvider>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC' }}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC',
+          }}>
           <ActivityIndicator size="large" color={DEFAULT_CONFIG.primary_color} />
-          <Text style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A', marginTop: 16 }}>Checking login status...</Text>
+          <Text style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A', marginTop: 16 }}>
+            Checking login status...
+          </Text>
         </View>
       </ThemeProvider>
     );
@@ -487,7 +506,6 @@ export default function App() {
             </>
           ) : (
             <View style={styles.noIncidentContainer}>
-              <Text style={[styles.noIncidentText, { color: theme.textSecondary }]}>No active incident</Text>
               <Pressable
                 style={[styles.historyButton, { backgroundColor: theme.surface }]}
                 onPress={handleToggleHistory}>
@@ -516,15 +534,25 @@ export default function App() {
           isDarkMode={isDarkMode}
         />
 
-        <HistoryModal visible={state.showHistory} onClose={handleToggleHistory} isDarkMode={isDarkMode} />
+        <HistoryModal
+          visible={state.showHistory}
+          onClose={handleToggleHistory}
+          isDarkMode={isDarkMode}
+        />
+
+        <CameraCaptureModal
+          visible={isCameraOpen}
+          onClose={() => setIsCameraOpen(false)}
+          onCapture={handleCameraCaptured}
+          isDarkMode={isDarkMode}
+        />
 
         {/* Logout Confirmation Modal */}
         <Modal
           transparent
           visible={showLogoutModal}
           animationType="fade"
-          onRequestClose={cancelLogout}
-        >
+          onRequestClose={cancelLogout}>
           <Pressable style={styles.modalOverlay} onPress={cancelLogout}>
             <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
               <Text style={[styles.modalTitle, { color: theme.text }]}>Logout</Text>
@@ -532,16 +560,12 @@ export default function App() {
                 Are you sure you want to logout?
               </Text>
               <View style={styles.modalButtons}>
-                <Pressable
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={cancelLogout}
-                >
+                <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={cancelLogout}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.modalButton, styles.confirmButton]}
-                  onPress={confirmLogout}
-                >
+                  onPress={confirmLogout}>
                   <Text style={styles.confirmButtonText}>Logout</Text>
                 </Pressable>
               </View>
@@ -695,4 +719,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
