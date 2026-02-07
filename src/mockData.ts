@@ -1,0 +1,357 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from 'lib/axios';
+import { ip } from 'lib/Domain';
+import {
+  Incident,
+  HistoricalIncident,
+  ChatMessage,
+  AppConfig,
+  Theme,
+  ReportStatus,
+  IncidentStatus,
+} from './types';
+
+// Helper function to determine current status from API response
+export const getCurrentStatus = (statusData: ReportStatus | null): IncidentStatus => {
+  if (!statusData) return 'Pending';
+
+  // Check for completed status
+  if (statusData.cleared_at || statusData.completed_at) return 'Completed';
+
+  // Check for arrived status
+  if (statusData.arrived_at) return 'Arrived';
+
+  // Check for ongoing status
+  if (statusData.ongoing_at) return 'Ongoing';
+
+  // Default to Pending
+  return 'Pending';
+};
+
+// Fetch report status from API
+export const fetchReportStatus = async (reportId?: string): Promise<ReportStatus | null> => {
+  try {
+    console.log('Fetching report status from /responder/report/status...');
+    const response = await api.post(`/responder/report/status`, { reportId });
+    console.log('Report status fetched successfully:', response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error('Error fetching report status:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    return null;
+  }
+};
+
+// Update report status via API
+export const updateReportStatus = async (): Promise<boolean> => {
+  try {
+    console.log('Updating report status via /responder/report/update/status...');
+    await api.post(`/responder/report/update/status`);
+    console.log('Report status updated successfully');
+    return true;
+  } catch (error: any) {
+    console.error('Error updating report status:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    return false;
+  }
+};
+
+// API functions for accept/decline incident
+export const acceptIncident = async (userId: string, reportId: string): Promise<boolean> => {
+  try {
+    await api.post(`/responder/report/${userId}/${reportId}/accept`);
+    console.log('Incident accepted successfully');
+    return true;
+  } catch (error) {
+    console.error('Error accepting incident:', error);
+    return false;
+  }
+};
+
+export const declineIncident = async (
+  userId: string,
+  reportId: string,
+  declineReason: string
+): Promise<boolean> => {
+  try {
+    await api.post(`/responder/report/${userId}/${reportId}/decline`, {
+      decline_reason: declineReason,
+    });
+    console.log('Incident declined successfully');
+    return true;
+  } catch (error) {
+    console.error('Error declining incident:', error);
+    return false;
+  }
+};
+
+export const fetchIncomingIncident = async (): Promise<Incident> => {
+  try {
+    // Get user data from AsyncStorage to verify
+    const userData = await AsyncStorage.getItem('user');
+
+    if (userData) {
+      const parsedUser = JSON.parse(userData);
+      console.log('user data stored:', parsedUser.user);
+
+      // Make API call and properly return the transformed data
+      const response = await api.get(`/responder/report/${parsedUser.user.unit_id}`);
+      const reportDetails = response.data.reportDetails;
+      console.log(`incoming report ${JSON.stringify(reportDetails)}`);
+      console.log(`Status report ${response.data.is_accepted}`);
+
+      // FIX: get first item from array
+      const report = Array.isArray(reportDetails) ? reportDetails[0] : reportDetails;
+
+      const coordinates = {
+        lat: report?.coordinates?.lat ?? 0,
+        lng: report?.coordinates?.lng ?? 0,
+      };
+
+      // Return properly transformed incident
+      return {
+        id: report?.id?.toString() || '0',
+        type: report?.title || 'Unknown',
+        location: report?.location || 'N/A',
+
+        // FIX: use coordinates directly
+        coordinates,
+
+        timeReported: report?.timeReported || new Date().toISOString(),
+        description: report?.description || '',
+        priority: report?.priority || 'Medium',
+        caller: report?.caller || 'Unknown',
+        callerPhone: report?.callerPhone || '',
+        icon: 'warning',
+
+        report_attachment: report?.image_path ? `${ip}/storage/${report.image_path}` : '',
+        isAccepted: response.data.is_accepted || false,
+      };
+    }
+
+    // Return default incident if no user data
+    return {
+      id: 'Unknown',
+      type: 'Unknown',
+      location: 'Unknown',
+      coordinates: { lat: 0, lng: 0 },
+      timeReported: new Date().toISOString(),
+      description: '',
+      priority: '',
+      caller: 'Unknown',
+      callerPhone: '',
+      icon: 'warning',
+      report_attachment: '',
+      isAccepted: false,
+    };
+  } catch (error) {
+    console.log('Error fetching incident:', error);
+
+    return {
+      id: 'Unknown',
+      type: 'Unknown',
+      location: 'Unknown',
+      coordinates: { lat: 0, lng: 0 },
+      timeReported: new Date().toISOString(),
+      description: '',
+      priority: '',
+      caller: 'Unknown',
+      callerPhone: '',
+      icon: 'warning',
+      report_attachment: '',
+      isAccepted: false,
+    };
+  }
+};
+
+export const fetchHistoricalIncidents = async (): Promise<HistoricalIncident[]> => {
+  try {
+    const response = await api.get('/responder/History');
+    const data = Array.isArray(response.data) ? response.data : [];
+
+    return data.map((item: any) => ({
+      id: String(item.id ?? ''),
+      type: item.type ?? 'Unknown',
+      location: item.location ?? 'Unknown',
+      timeReported: item.timeReported ?? new Date().toISOString(),
+      status: item.status ?? 'Pending',
+      responder: item.responder ?? 'Unknown',
+      description: item.description ?? '',
+      actions_taken: item.actions_taken ?? null,
+      time_completed: item.time_completed ?? null,
+      additional_notes: item.additional_notes ?? null,
+      photo_path: item.photo_path ? `${ip}/storage/${item.photo_path}` : null,
+    }));
+  } catch (error: any) {
+    console.error('Error fetching historical incidents:', error.response?.data || error.message);
+    return [];
+  }
+};
+
+export const fetchChatMessages = async (reportId: string): Promise<ChatMessage[]> => {
+  try {
+    if (!reportId) {
+      return [];
+    }
+    const match = String(reportId).match(/\d+/);
+    const reportIdNum = match ? Number(match[0]) : Number(reportId);
+    if (!Number.isFinite(reportIdNum) || reportIdNum <= 0) {
+      console.warn('Skipping chat fetch: invalid report id', reportId);
+      return [];
+    }
+    const response = await api.post('/responder/ChatMessages', {
+      report_id: reportIdNum,
+    });
+    const data = Array.isArray(response.data) ? response.data : [];
+
+    return data.map((item: any) => {
+      const rawImage = item.image ?? null;
+      const image =
+        rawImage && typeof rawImage === 'string'
+          ? rawImage.startsWith('http')
+            ? rawImage
+            : `${ip}/storage/${rawImage}`
+          : null;
+
+      return {
+        id: Number(item.id ?? 0),
+        sender: item.sender ?? 'Dispatch',
+        message: item.message ?? '',
+        time: item.time ?? '',
+        isUser: Boolean(item.isUser),
+        image,
+        timestamp: item.timestamp ?? null,
+        sender_id: item.sender_id ?? null,
+        receiver_id: item.receiver_id ?? null,
+      };
+    });
+  } catch (error: any) {
+    console.error('Error fetching chat messages:', error.response?.data || error.message);
+    return [];
+  }
+};
+
+export const addChatMessage = async (
+  reportId: number,
+  message: {
+    report_id: number;
+    name?: string;
+    message: string;
+    sender?: string;
+    receiver?: number;
+    receiver_id?: number;
+    timestamp?: string;
+    image?: string;
+  }
+): Promise<void> => {
+  try {
+    if (!message.message || !message.message.trim()) {
+      throw new Error('Message content is required');
+    }
+
+    const { getStoredUser } = await import('../components/lib/auth');
+    const userData = await getStoredUser();
+    const userId = userData?.user?.id;
+    if (!userId) {
+      throw new Error('User not authenticated');
+    }
+
+    const receiverId =
+      message.receiver ??
+      message.receiver_id ??
+      userData?.user?.receiver_id ??
+      userData?.user?.dispatcher_id ??
+      2;
+
+    let payload: any;
+    let config: any = {};
+
+    if (message.image) {
+      payload = new FormData();
+      payload.append('report_id', String(reportId));
+      payload.append('sender_id', String(userId));
+      payload.append('receiver_id', String(receiverId));
+      payload.append('message', message.message.trim());
+
+      const imageUri = message.image;
+      const filename = imageUri.split('/').pop() || 'image.jpg';
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+      payload.append('image', {
+        uri: imageUri,
+        name: filename,
+        type,
+      } as any);
+
+      config = {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      };
+    } else {
+      payload = {
+        report_id: reportId,
+        sender_id: userId,
+        receiver_id: receiverId,
+        message: message.message.trim(),
+      };
+
+      config = {};
+    }
+
+    await api.post('/responder/sendChat', payload, config);
+  } catch (err) {
+    console.warn('Failed to add chat message:', err);
+    throw err;
+  }
+};
+
+export const STATUS_FLOW: string[] = ['Pending', 'Ongoing', 'Arrived', 'Completed', 'Cleared'];
+
+export const STATUS_COLORS: Record<string, string> = {
+  Pending: '#f97316',
+  Ongoing: '#3b82f6',
+  Arrived: '#22c55e',
+  Completed: '#10b981',
+  Cancelled: '#ef4444',
+  Duplicate: '#CAB603',
+  Cleared: '#08D38F',
+};
+
+export const DEFAULT_CONFIG: AppConfig = {
+  app_title: 'Responder',
+  responder_name: 'Unit 12',
+  primary_color: '#3B82F6',
+  secondary_color: '#1E293B',
+  accent_color: '#10B981',
+  text_color: '#F8FAFC',
+  background_color: '#0F172A',
+};
+
+export const THEMES: Record<string, Theme> = {
+  dark: {
+    background: '#0F172A',
+    surface: '#1E293B',
+    surfaceAlt: '#334155',
+    text: '#F8FAFC',
+    textSecondary: '#94A3B8',
+    border: '#334155',
+    mapBg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+  },
+  light: {
+    background: '#F8FAFC',
+    surface: '#FFFFFF',
+    surfaceAlt: '#E2E8F0',
+    text: '#0F172A',
+    textSecondary: '#475569',
+    border: '#CBD5E1',
+    mapBg: 'linear-gradient(135deg, #E0E7FF 0%, #DBEAFE 50%, #BFDBFE 100%)',
+  },
+};
