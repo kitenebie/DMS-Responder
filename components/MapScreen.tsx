@@ -71,6 +71,7 @@ interface MapScreenProps {
   incident?: Incident | null;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
+  showFullscreenToggle?: boolean;
 }
 
 interface RouteStep {
@@ -133,6 +134,7 @@ const MapScreen = memo(function MapScreen({
   incident,
   onToggleFullscreen,
   isFullscreen,
+  showFullscreenToggle = true,
 }: MapScreenProps) {
   // Use dark or light map style based on isDarkMode
   const currentMapStyle = isDarkMode ? CARTO_DB_DARK_STYLE : CARTO_DB_STYLE;
@@ -375,7 +377,7 @@ const MapScreen = memo(function MapScreen({
       </Pressable>
 
       {/* Fullscreen Toggle Button */}
-      {onToggleFullscreen && (
+      {onToggleFullscreen && showFullscreenToggle && (
         <Pressable
           style={[styles.fullscreenButton, isDarkMode && styles.fullscreenButtonDark]}
           onPress={onToggleFullscreen}>
@@ -393,7 +395,7 @@ const MapScreen = memo(function MapScreen({
 const styles = StyleSheet.create({
   addressContainer: {
     position: 'absolute',
-    top: 60,
+    top: 90,
     left: 16,
     right: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',

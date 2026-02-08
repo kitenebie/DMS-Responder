@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Modal,
   Alert,
+  Image,
 } from 'react-native';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
@@ -21,9 +22,10 @@ import { HistoryModal } from './components/HistoryModal';
 import { ReportForm } from './components/ReportForm';
 import { ActionBar } from './components/ActionBar';
 import { QuickAccess } from './components/QuickAccess';
-import { CameraCaptureModal } from './components/CameraCaptureModal';
 import { Icon } from './components/Icon';
-import { getCredentials, getStoredUser, login } from './components/lib/auth';
+import { getCredentials, login } from './components/lib/auth';
+import { sendLocation, stopLocationUpdates, submitReportForm } from './components/lib/axios';
+import { locationService } from './components/services/locationService';
 import {
   fetchIncomingIncident,
   fetchChatMessages,
@@ -31,20 +33,23 @@ import {
   DEFAULT_CONFIG,
   STATUS_COLORS,
 } from './src/mockData';
-import { submitReportForm, sendChatMessage } from './components/lib/axios';
 import { AppState, ReportForm as ReportFormType, IncidentStatus, Incident } from './src/types';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Background from 'Background';
 
-export default function App() {
+const AppContent = () => {
+  const insets = useSafeAreaInsets();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const statusTrackerYRef = useRef(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(true);
+  const [userName, setUserName] = useState(DEFAULT_CONFIG.responder_name);
 
   const [state, setState] = useState<AppState>({
     showIncomingModal: false,
     activeIncident: null,
-    currentStatus: 'Ongoing',
+    currentStatus: 'Active',
     isMapFullscreen: false,
     showChat: false,
     showHistory: false,
@@ -65,7 +70,73 @@ export default function App() {
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
+
+  const resolveUserName = useCallback((userData: any) => {
+    return (
+      userData?.user?.name ??
+      userData?.user?.full_name ??
+      userData?.name ??
+      DEFAULT_CONFIG.responder_name
+    );
+  }, []);
+
+  const resetIncidentState = useCallback(() => {
+    setIncomingIncident(null);
+    setPhotoUri(null);
+    setState((prev) => ({
+      ...prev,
+      showIncomingModal: false,
+      activeIncident: null,
+      currentStatus: 'Active',
+      showChat: false,
+      chatMessages: [],
+      reportForm: {
+        actionsTaken: '',
+        timeArrived: '',
+        timeCompleted: '',
+        additionalNotes: '',
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      stopLocationUpdates();
+      return;
+    }
+
+    let isMounted = true;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let isSending = false;
+
+    const sendCurrentLocation = async () => {
+      if (isSending || !isMounted) return;
+      isSending = true;
+      try {
+        const location = await locationService.getCurrentLocation(true);
+        if (!isMounted) return;
+        await sendLocation(
+          { lat: location.latitude, lng: location.longitude },
+          { repeat: false }
+        );
+      } catch (error) {
+        console.log('[Location] Failed to send location:', error);
+      } finally {
+        isSending = false;
+      }
+    };
+
+    sendCurrentLocation();
+    intervalId = setInterval(sendCurrentLocation, 3000);
+
+    return () => {
+      isMounted = false;
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      stopLocationUpdates();
+    };
+  }, [isLoggedIn]);
 
   // Auto-login on app start
   useEffect(() => {
@@ -74,7 +145,8 @@ export default function App() {
         const credentials = await getCredentials();
         if (credentials && credentials.email && credentials.password) {
           console.log('Auto-login with stored credentials');
-          await login(credentials.email, credentials.password);
+          const userData = await login(credentials.email, credentials.password);
+          setUserName(resolveUserName(userData));
           setIsLoggedIn(true);
         }
       } catch (error) {
@@ -92,6 +164,13 @@ export default function App() {
   useEffect(() => {
     const loadIncident = async () => {
       const incident = await fetchIncomingIncident();
+      const incidentIdNum = Number(incident?.id ?? 0);
+      const hasValidIncident = Number.isFinite(incidentIdNum) && incidentIdNum > 0;
+
+      if (!hasValidIncident) {
+        resetIncidentState();
+        return;
+      }
       // Check if the incident is a valid real incident (not "Unknown" defaults)
       // If incident is already accepted, automatically set it as active and show on map
       if (incident.id !== "0"  && incident.id !== "unknown" && incident.isAccepted === true && incident.isAccepted !== null) {
@@ -99,7 +178,7 @@ export default function App() {
         setState((prev) => ({
           ...prev,
           activeIncident: incident,
-          currentStatus: (incident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
+          currentStatus: 'Active',
         }));
         return;
       }
@@ -131,7 +210,7 @@ export default function App() {
       ...prev,
       showIncomingModal: false,
       activeIncident: incomingIncident,
-      currentStatus: (incomingIncident.status as IncidentStatus) || ('Ongoing' as IncidentStatus),
+      currentStatus: 'Active',
     }));
   }, [incomingIncident]);
 
@@ -143,11 +222,15 @@ export default function App() {
   }, []);
 
   const handleUpdateStatus = useCallback((newStatus: IncidentStatus) => {
+    if (newStatus === 'Cleared') {
+      resetIncidentState();
+      return;
+    }
     setState((prev) => ({
       ...prev,
       currentStatus: newStatus,
     }));
-  }, []);
+  }, [resetIncidentState]);
 
   const handleToggleMapFullscreen = useCallback(() => {
     setState((prev) => ({
@@ -194,10 +277,18 @@ export default function App() {
     setIsDarkMode((prev) => !prev);
   }, []);
 
+  const handleScrollToStatus = useCallback(() => {
+    scrollViewRef.current?.scrollTo({
+      y: Math.max(statusTrackerYRef.current - 8, 0),
+      animated: true,
+    });
+  }, []);
+
   const handleLogin = useCallback((userData: any) => {
     console.log('Login successful:', userData);
+    setUserName(resolveUserName(userData));
     setIsLoggedIn(true);
-  }, []);
+  }, [resolveUserName]);
 
   const handleLogout = useCallback(() => {
     setShowLogoutModal(true);
@@ -206,6 +297,7 @@ export default function App() {
   const confirmLogout = useCallback(() => {
     setShowLogoutModal(false);
     setIsLoggedIn(false);
+    setUserName(DEFAULT_CONFIG.responder_name);
   }, []);
 
   const cancelLogout = useCallback(() => {
@@ -223,71 +315,88 @@ export default function App() {
 
       if (!message.trim() && images.length === 0) return;
 
-      // Get sender ID from stored user data
-      const userData = await getStoredUser();
-      const senderId = userData?.user?.id;
-      if (!senderId) {
-        console.warn('User ID not found for chat send');
-        return;
-      }
-
-      // Receiver ID would typically be the dispatcher or report owner
-      // For now, use a default or get from incident data
-      const receiverId = state.activeIncident?.user_id || 1; // Fallback to 1 if not available
+      const reportTitle = state.activeIncident?.type ?? 'Incident';
+      const receiverId =
+        state.activeIncident?.receiver_id ??
+        state.activeIncident?.dispatcher_id ??
+        undefined;
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const tempIds: number[] = [];
 
       try {
-        // Send text message or first image
         if (images.length > 0) {
-          // Send message with first image
-          const response = await sendChatMessage({
-            report_id: reportIdNum,
-            sender_id: senderId,
-            receiver_id: receiverId,
-            message: message.trim() || 'Photo message',
-            image: images[0],
-          });
-
-          if (response.success && response.data) {
-            // Add sent message to local state
-            const newMessage = {
-              id: response.data.id || Date.now(),
-              sender: userData?.user?.firstName || 'You',
+          const optimisticMessages = images.map((imageUri, idx) => {
+            const tempId = Date.now() + idx;
+            tempIds.push(tempId);
+            return {
+              id: tempId,
+              sender: DEFAULT_CONFIG.responder_name,
               message: message.trim() || 'Photo message',
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              time: nowTime,
               isUser: true,
-              image: images[0],
+              image: imageUri,
+              status: 'sending' as const,
             };
-            setState((prev) => ({
-              ...prev,
-              chatMessages: [...prev.chatMessages, newMessage],
-            }));
+          });
+          setState((prev) => ({
+            ...prev,
+            chatMessages: [...prev.chatMessages, ...optimisticMessages],
+          }));
+          for (const imageUri of images) {
+            await addChatMessage(reportIdNum, {
+              report_id: reportIdNum,
+              name: reportTitle,
+              message: message.trim() || 'Photo message',
+              sender: 'user',
+              timestamp: new Date().toISOString(),
+              image: imageUri,
+              receiver_id: receiverId,
+            });
           }
         } else {
-          // Send text-only message
-          const response = await sendChatMessage({
+          const tempId = Date.now();
+          tempIds.push(tempId);
+          setState((prev) => ({
+            ...prev,
+            chatMessages: [
+              ...prev.chatMessages,
+              {
+                id: tempId,
+                sender: DEFAULT_CONFIG.responder_name,
+                message: message.trim(),
+                time: nowTime,
+                isUser: true,
+                status: 'sending',
+              },
+            ],
+          }));
+          await addChatMessage(reportIdNum, {
             report_id: reportIdNum,
-            sender_id: senderId,
-            receiver_id: receiverId,
+            name: reportTitle,
             message: message.trim(),
+            sender: 'user',
+            timestamp: new Date().toISOString(),
+            receiver_id: receiverId,
           });
-
-          if (response.success && response.data) {
-            // Add sent message to local state
-            const newMessage = {
-              id: response.data.id || Date.now(),
-              sender: userData?.user?.firstName || 'You',
-              message: message.trim(),
-              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              isUser: true,
-            };
-            setState((prev) => ({
-              ...prev,
-              chatMessages: [...prev.chatMessages, newMessage],
-            }));
-          }
         }
+
+        const updatedChats = await fetchChatMessages(String(reportIdNum));
+        setState((prev) => ({
+          ...prev,
+          chatMessages: updatedChats.map((chat) =>
+            chat.isUser ? { ...chat, status: 'sent' } : chat
+          ),
+        }));
       } catch (err) {
         console.warn('Failed to send message:', err);
+        if (tempIds.length > 0) {
+          setState((prev) => ({
+            ...prev,
+            chatMessages: prev.chatMessages.map((msg) =>
+              tempIds.includes(msg.id) ? { ...msg, status: 'failed' } : msg
+            ),
+          }));
+        }
         Alert.alert('Error', 'Failed to send message. Please try again.');
       }
     },
@@ -304,41 +413,31 @@ export default function App() {
     }));
   }, []);
 
-  const handleSubmitReport = useCallback(
-    async (payload: { form: ReportFormType; photoUri?: string | null }) => {
-      try {
-        const incidentId = state.activeIncident?.id ?? undefined;
-        await submitReportForm(payload.form, payload.photoUri ?? photoUri, incidentId);
-        Alert.alert('Success', 'Report submitted successfully!');
+  const handleSubmitReport = useCallback(async () => {
+    try {
+      const incidentId = state.activeIncident?.id ?? undefined;
+      await submitReportForm(state.reportForm, photoUri, incidentId);
+      Alert.alert('Success', 'Report submitted successfully!');
+      setState((prev) => ({
+        ...prev,
+        reportForm: {
+          actionsTaken: '',
+          timeArrived: '',
+          timeCompleted: '',
+          additionalNotes: '',
+        },
+      }));
+      setPhotoUri(null);
+    } catch (error: any) {
+      Alert.alert(
+        'Error',
+        error.response?.data?.message || 'Failed to submit report. Please try again.'
+      );
+    }
+  }, [state.reportForm, photoUri, state.activeIncident]);
 
-        // Reset form after submission
-        setState((prev) => ({
-          ...prev,
-          reportForm: {
-            actionsTaken: '',
-            timeArrived: '',
-            timeCompleted: '',
-            additionalNotes: '',
-          },
-        }));
-        setPhotoUri(null);
-      } catch (error: any) {
-        Alert.alert(
-          'Error',
-          error.response?.data?.message || 'Failed to submit report. Please try again.'
-        );
-      }
-    },
-    [photoUri, state.activeIncident]
-  );
-
-  const handleTakePhoto = useCallback(() => {
-    setIsCameraOpen(true);
-  }, []);
-
-  const handleCameraCaptured = useCallback((uri: string) => {
+  const handlePhotoCaptured = useCallback((uri: string) => {
     setPhotoUri(uri);
-    setIsCameraOpen(false);
   }, []);
 
   // Remove photo
@@ -353,6 +452,8 @@ export default function App() {
     text: isDarkMode ? '#F8FAFC' : '#0F172A',
     textSecondary: isDarkMode ? '#94A3B8' : '#475569',
   };
+  const isStatusCompleted = state.currentStatus === 'Completed';
+  const mapShouldBeFullscreen = state.isMapFullscreen || isStatusCompleted;
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -385,9 +486,8 @@ export default function App() {
 
   const renderStatusBadge = () => {
     if (state.activeIncident) {
-      const badgeStatus =
-        (state.activeIncident.status as IncidentStatus | undefined) ?? state.currentStatus;
-      const color = STATUS_COLORS[badgeStatus] || STATUS_COLORS[state.currentStatus];
+      const badgeStatus = state.currentStatus;
+      const color = STATUS_COLORS[badgeStatus] || STATUS_COLORS.Pending;
       return (
         <View style={[styles.statusBadge, { backgroundColor: color }]}>
           <Text style={styles.statusBadgeText}>{badgeStatus}</Text>
@@ -401,17 +501,94 @@ export default function App() {
     );
   };
 
+  const renderHeader = (overlay = false) => (
+    <View
+      style={[
+        styles.header,
+        { backgroundColor: theme.surface, borderBottomColor: theme.surfaceAlt },
+        overlay && { paddingTop: insets.top },
+        overlay && styles.headerOverlay,
+      ]}>
+      <View style={styles.headerLeft}>
+        <Pressable onPress={handleLogout} style={styles.logoutButton}>
+          <Icon name="logout" size={20} color={theme.text} />
+        </Pressable>
+        <View style={[styles.headerIcon, { backgroundColor: DEFAULT_CONFIG.primary_color }]}>
+          <Image source={require('./assets/icon.png')} style={styles.headerLogo} />
+        </View>
+        <View>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>{DEFAULT_CONFIG.app_title}</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
+            {userName}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.headerRight}>
+        <Pressable
+          onPress={handleToggleTheme}
+          style={[styles.themeButton, { backgroundColor: theme.surfaceAlt }]}>
+          <Icon name={isDarkMode ? 'moon' : 'sun'} size={22} color={theme.text} />
+        </Pressable>
+        {renderStatusBadge()}
+      </View>
+    </View>
+  );
+
   if (state.isMapFullscreen) {
     return (
       <ThemeProvider>
         <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
           <StatusBar />
+          {renderHeader(true)}
           <Map
             isDarkMode={isDarkMode}
-            isFullscreen={state.isMapFullscreen}
+            isFullscreen={true}
             incident={state.activeIncident}
             onToggleFullscreen={handleToggleMapFullscreen}
             onRestoreSize={handleRestoreMapSize}
+            showFullscreenToggle={!isStatusCompleted}
+          />
+        </View>
+      </ThemeProvider>
+    );
+  }
+
+  if (!state.activeIncident) {
+    return (
+      <ThemeProvider>
+        <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
+          <StatusBar />
+          {renderHeader(true)}
+          <Map
+            isDarkMode={isDarkMode}
+            isFullscreen={true}
+            incident={null}
+            onToggleFullscreen={() => {}}
+            onRestoreSize={() => {}}
+            onMapPress={() => setIsMapInteracting(true)}
+            onMapRelease={() => setIsMapInteracting(false)}
+            showFullscreenToggle={false}
+          />
+
+          <Pressable
+            style={[styles.floatingHistoryButton, { backgroundColor: theme.surface }]}
+            onPress={handleToggleHistory}>
+            <Icon name="history" size={26} color={theme.text} />
+          </Pressable>
+
+          {incomingIncident !== null && (
+            <IncomingModal
+              visible={state.showIncomingModal}
+              incident={incomingIncident}
+              onAccept={handleAcceptIncident}
+              onDismiss={handleDismissIncident}
+            />
+          )}
+
+          <HistoryModal
+            visible={state.showHistory}
+            onClose={handleToggleHistory}
+            isDarkMode={isDarkMode}
           />
         </View>
       </ThemeProvider>
@@ -425,79 +602,60 @@ export default function App() {
         <StatusBar />
 
         {/* Header */}
-        <View
-          style={[
-            styles.header,
-            { backgroundColor: theme.surface, borderBottomColor: theme.surfaceAlt },
-          ]}>
-          <View style={styles.headerLeft}>
-            <Pressable onPress={handleLogout} style={styles.logoutButton}>
-              <Icon name="logout" size={20} color={theme.text} />
-            </Pressable>
-            <View style={[styles.headerIcon, { backgroundColor: DEFAULT_CONFIG.primary_color }]}>
-              <Icon name="alert" size={24} color="#fff" />
-            </View>
-            <View>
-              <Text style={[styles.headerTitle, { color: theme.text }]}>
-                {DEFAULT_CONFIG.app_title}
-              </Text>
-              <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-                {DEFAULT_CONFIG.responder_name}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.headerRight}>
-            <Pressable
-              onPress={handleToggleTheme}
-              style={[styles.themeButton, { backgroundColor: theme.surfaceAlt }]}>
-              <Icon name={isDarkMode ? 'moon' : 'sun'} size={22} color={theme.text} />
-            </Pressable>
-            {renderStatusBadge()}
-          </View>
-        </View>
+        {renderHeader()}
 
         {/* Main Content */}
         <ScrollView
+          ref={scrollViewRef}
           style={styles.mainContent}
           contentContainerStyle={styles.mainContentContainer}
           showsVerticalScrollIndicator={false}
           scrollEnabled={!isMapInteracting}>
           <Map
             isDarkMode={isDarkMode}
-            isFullscreen={state.isMapFullscreen}
+            isFullscreen={mapShouldBeFullscreen}
             incident={state.activeIncident}
-            onToggleFullscreen={handleToggleMapFullscreen}
+            onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
             onRestoreSize={handleRestoreMapSize}
             onMapPress={() => setIsMapInteracting(true)}
             onMapRelease={() => setIsMapInteracting(false)}
+            showFullscreenToggle={!isStatusCompleted}
           />
 
           {state.activeIncident ? (
             <>
-              <QuickAccess
-                onOpenChat={handleToggleChat}
-                onOpenHistory={handleToggleHistory}
-                currentStatus={state.currentStatus}
-                isDarkMode={isDarkMode}
-                onUpdateStatus={handleUpdateStatus}
-              />
+              {state.currentStatus !== 'Completed' && (
+                <QuickAccess
+                  onOpenChat={handleToggleChat}
+                  onOpenHistory={handleToggleHistory}
+                  onOpenStatus={handleScrollToStatus}
+                  currentStatus={state.currentStatus}
+                  isDarkMode={isDarkMode}
+                  onUpdateStatus={handleUpdateStatus}
+                />
+              )}
               <IncidentDetails
                 incident={state.activeIncident}
                 responderName={DEFAULT_CONFIG.responder_name}
                 isDarkMode={isDarkMode}
               />
-              <StatusTracker
-                incidentId={state.activeIncident.id}
-                onUpdateStatus={handleUpdateStatus}
-                isDarkMode={isDarkMode}
-              />
-              {state.currentStatus === 'Completed' && (
+              <View
+                onLayout={(event) => {
+                  statusTrackerYRef.current = event.nativeEvent.layout.y;
+                }}>
+                <StatusTracker
+                  incidentId={state.activeIncident.id}
+                  onUpdateStatus={handleUpdateStatus}
+                  isDarkMode={isDarkMode}
+                />
+              </View>
+              {state.currentStatus === 'Arrived' && (
                 <ReportForm
                   form={state.reportForm}
                   onUpdateForm={handleUpdateReportForm}
                   onSubmit={handleSubmitReport}
                   photoUri={photoUri}
-                  onTakePhoto={handleTakePhoto}
+                  onPhotoCaptured={handlePhotoCaptured}
                   onRemovePhoto={handleRemovePhoto}
                   isDarkMode={isDarkMode}
                 />
@@ -540,13 +698,6 @@ export default function App() {
           isDarkMode={isDarkMode}
         />
 
-        <CameraCaptureModal
-          visible={isCameraOpen}
-          onClose={() => setIsCameraOpen(false)}
-          onCapture={handleCameraCaptured}
-          isDarkMode={isDarkMode}
-        />
-
         {/* Logout Confirmation Modal */}
         <Modal
           transparent
@@ -575,6 +726,14 @@ export default function App() {
       </SafeAreaView>
     </ThemeProvider>
   );
+};
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -592,6 +751,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
   },
+  headerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -607,16 +773,22 @@ const styles = StyleSheet.create({
   headerIcon: {
     width: 40,
     height: 40,
-    borderRadius: 10,
+    borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 40,
+    resizeMode: 'contain',
   },
   headerTitle: {
     fontSize: 17,
     fontWeight: '700',
   },
   headerSubtitle: {
-    fontSize: 12,
+    fontSize: 9,
   },
   headerRight: {
     flexDirection: 'row',
@@ -715,6 +887,28 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   historyButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  floatingHistoryButton: {
+    position: 'absolute',
+    right: 16,
+    top: 150,
+    width: 46,
+    height: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    display: 'flex',
+    justifyContent: 'center',
+    borderRadius: 50,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  floatingHistoryText: {
     fontSize: 14,
     fontWeight: '600',
   },

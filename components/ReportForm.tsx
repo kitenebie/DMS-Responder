@@ -3,13 +3,14 @@ import { View, Text, Pressable, TextInput, StyleSheet, Image, ActivityIndicator,
 import { ReportForm as ReportFormType } from '@/types';
 import { Icon } from './Icon';
 import { getTheme } from '@/utils';
+import { CameraCaptureModal } from './CameraCaptureModal';
 
 interface ReportFormProps {
   form: ReportFormType;
   onUpdateForm: (field: keyof ReportFormType, value: string) => void;
   onSubmit: () => void;
   photoUri?: string | null;
-  onTakePhoto: () => void;
+  onPhotoCaptured: (uri: string) => void;
   onRemovePhoto: () => void;
   submitting?: boolean;
   isDarkMode: boolean;
@@ -20,13 +21,14 @@ export const ReportForm: React.FC<ReportFormProps> = ({
   onUpdateForm, 
   onSubmit,
   photoUri,
-  onTakePhoto,
+  onPhotoCaptured,
   onRemovePhoto,
   submitting = false,
   isDarkMode,
 }) => {
   const theme = getTheme(isDarkMode);
   const [errors, setErrors] = useState<{ actionsTaken?: boolean; photoUri?: boolean }>({});
+  const [showCamera, setShowCamera] = useState(false);
 
   const validateForm = () => {
     const newErrors: { actionsTaken?: boolean; photoUri?: boolean } = {};
@@ -49,6 +51,15 @@ export const ReportForm: React.FC<ReportFormProps> = ({
     } else {
       Alert.alert('Validation Error', 'Please fill in all required fields and add a photo.');
     }
+  };
+
+  const handleTakePhoto = () => {
+    setShowCamera(true);
+  };
+
+  const handleCameraCaptured = (uri: string) => {
+    onPhotoCaptured(uri);
+    setShowCamera(false);
   };
 
   return (
@@ -142,7 +153,7 @@ export const ReportForm: React.FC<ReportFormProps> = ({
                 errors.photoUri && styles.photoUploadButtonError,
                 submitting && styles.disabledButton
               ]} 
-              onPress={onTakePhoto}
+              onPress={handleTakePhoto}
               disabled={submitting}>
               <Icon name="camera" size={24} color="#34D399" />
               <Text style={[styles.photoUploadText, { color: theme.text }]}>Take Photo</Text>
@@ -168,17 +179,25 @@ export const ReportForm: React.FC<ReportFormProps> = ({
           )}
         </Pressable>
       </View>
+
+      <CameraCaptureModal
+        visible={showCamera}
+        onClose={() => setShowCamera(false)}
+        onCapture={handleCameraCaptured}
+        isDarkMode={isDarkMode}
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    width: '100%',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 0,
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#10B981',
+    borderWidth: 0,
   },
   header: {
     flexDirection: 'row',

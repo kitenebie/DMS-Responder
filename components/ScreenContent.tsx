@@ -281,7 +281,7 @@ export const ScreenContent = ({ title, path, children }: ScreenContentProps) => 
         {/* Incident Details */}
         {state.activeIncident && (
           <View className="rounded-xl p-4 bg-slate-800 border border-slate-700">
-            <Text className="text-lg font-bold mb-4 text-white">Active Incident</Text>
+            <Text className="text-lg font-bold mb-4 text-white">Active</Text>
             <View className="grid grid-cols-2 gap-3">
               <View className="rounded-lg p-3 bg-slate-700">
                 <Text className="text-xs mb-1 text-gray-400">Incident ID</Text>

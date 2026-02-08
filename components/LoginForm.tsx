@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
@@ -65,9 +66,9 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
           {/* Logo/Header Section */}
           <View style={styles.header}>
             <View style={[styles.logoContainer, { backgroundColor: theme.primary }]}>
-              <Icon name="alert" size={48} color="#fff" />
+              <Image source={require('../assets/icon.png')} style={styles.logoImage} />
             </View>
-            <Text style={[styles.title, { color: theme.text }]}>Dispatch Management</Text>
+            <Text style={[styles.title, { color: theme.text }]}>Responder Dispatch App</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               Responder Login
             </Text>
@@ -136,7 +137,7 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: theme.textSecondary }]}>
-              © 2024 Dispatch Management System
+              © 2024 EARMS App
             </Text>
           </View>
         </View>
@@ -164,10 +165,16 @@ const styles = StyleSheet.create({
   logoContainer: {
     width: 80,
     height: 80,
-    borderRadius: 20,
+    borderRadius: 80,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+  },
+  logoImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 80,
+    resizeMode: 'contain',
   },
   title: {
     fontSize: 24,

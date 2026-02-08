@@ -16,6 +16,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ChatMessage } from '@/types';
 import { getTheme } from '@/utils';
 import { Icon } from './Icon';
+import { CameraCaptureModal } from './CameraCaptureModal';
+import api from 'lib/axios';
 
 interface ChatModalProps {
   visible: boolean;
@@ -38,8 +40,11 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [showAttachOptions, setShowAttachOptions] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const theme = getTheme(isDarkMode);
+  const keyboardOffset = Platform.OS === 'ios' ? 0 : (StatusBar.currentHeight ?? 0) + 8;
 
   useEffect(() => {
     if (visible && messages.length > 0) {
@@ -86,33 +91,21 @@ export const ChatModal: React.FC<ChatModalProps> = ({
     }
   };
 
-  const handleTakePhoto = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        return;
-      }
+  const handleTakePhoto = () => {
+    setShowAttachOptions(false);
+    setShowCamera(true);
+  };
 
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.7,
-      });
-
-      if (!result.canceled && result.assets?.length) {
-        setSelectedImages((prev) => [...prev, result.assets[0].uri]);
-      }
-    } catch (err) {
-      console.warn('Failed to take photo:', err);
-    } finally {
-      setShowAttachOptions(false);
-    }
+  const handleCameraCaptured = (uri: string) => {
+    setSelectedImages((prev) => [...prev, uri]);
+    setShowCamera(false);
   };
 
   return (
     <Modal transparent={false} visible={visible} animationType="slide" statusBarTranslucent={false}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={keyboardOffset}
         style={[styles.container, { backgroundColor: theme.background }]}
       >
         <View
@@ -164,7 +157,9 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 )}
                 <Text style={[styles.messageText, { color: theme.text }]}>{msg.message}</Text>
                 {msg.image && (
-                  <Image source={{ uri: msg.image }} style={styles.messageImage} resizeMode="cover" />
+                  <Pressable onPress={() => setPreviewImage(msg.image)} style={styles.messageImageWrap}>
+                    <Image source={{ uri: msg.image }} style={styles.messageImage} resizeMode="cover" />
+                  </Pressable>
                 )}
                 <Text
                   style={[
@@ -175,6 +170,26 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 >
                   {msg.time}
                 </Text>
+                {msg.isUser && (
+                  <View style={styles.statusRow}>
+                    {msg.status === 'failed' ? (
+                      <>
+                        <Icon name="warning" size={12} color="#F87171" />
+                        <Text style={[styles.statusText, { color: '#F87171' }]}>Not sent</Text>
+                      </>
+                    ) : msg.status === 'sending' ? (
+                      <>
+                        <Icon name="time" size={12} color="#FBBF24" />
+                        <Text style={[styles.statusText, { color: '#FBBF24' }]}>Sending</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="check" size={12} color="#BFDBFE" />
+                        <Text style={[styles.statusText, { color: '#BFDBFE' }]}>Sent</Text>
+                      </>
+                    )}
+                  </View>
+                )}
               </View>
             </View>
           ))}
@@ -265,6 +280,28 @@ export const ChatModal: React.FC<ChatModalProps> = ({
               <Icon name="document" size={18} color={theme.text} />
               <Text style={[styles.attachOptionText, { color: theme.text }]}>Upload Photo</Text>
             </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <CameraCaptureModal
+        visible={showCamera}
+        onClose={() => setShowCamera(false)}
+        onCapture={handleCameraCaptured}
+        isDarkMode={isDarkMode}
+      />
+
+      <Modal
+        transparent
+        visible={!!previewImage}
+        animationType="fade"
+        onRequestClose={() => setPreviewImage(null)}
+      >
+        <Pressable style={styles.previewOverlay} onPress={() => setPreviewImage(null)}>
+          <View style={styles.previewContainer}>
+            {previewImage && (
+              <Image source={{ uri: previewImage }} style={styles.previewImage} resizeMode="contain" />
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -361,6 +398,15 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 4,
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  statusText: {
+    fontSize: 10,
+  },
   timeUser: {
     color: '#BFDBFE',
     textAlign: 'right',
@@ -386,8 +432,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   attachmentImage: {
-    width: '100%',
-    height: '100%',
+    width: 300,
+    height: 300,
   },
   attachmentRemove: {
     position: 'absolute',
@@ -435,9 +481,14 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   messageImage: {
-    width: 180,
-    height: 140,
+    width: 250,
+    height: 250,
     borderRadius: 10,
+    marginTop: 8,
+  },
+  messageImageWrap: {
+    borderRadius: 10,
+    overflow: 'hidden',
     marginTop: 8,
   },
   infoBox: {
@@ -479,5 +530,20 @@ const styles = StyleSheet.create({
   attachOptionText: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  previewContainer: {
+    width: '100%',
+    height: '100%',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
   },
 });

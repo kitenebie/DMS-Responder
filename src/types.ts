@@ -1,7 +1,7 @@
 // ==================== DATA TYPES ====================
 
 export type IncidentStatus =
-  | 'Pending'
+  | 'Active'
   | 'Ongoing'
   | 'Arrived'
   | 'Completed'
@@ -27,6 +27,8 @@ export interface Incident {
   icon?: string|null;
   report_attachment?: string|null;
   isAccepted: boolean
+  receiver_id?: number | null;
+  dispatcher_id?: number | null;
 }
 
 export interface HistoricalIncident {
@@ -53,6 +55,7 @@ export interface ChatMessage {
   timestamp?: string | null;
   sender_id?: number | null;
   receiver_id?: number | null;
+  status?: 'sending' | 'sent' | 'failed';
 }
 
 export interface Theme {

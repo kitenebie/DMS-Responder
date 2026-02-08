@@ -21,7 +21,7 @@ export const IncidentDetails: React.FC<IncidentDetailsProps> = ({
     <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.header}>
         <Icon name="document" size={20} color="#60A5FA" />
-        <Text style={[styles.title, { color: theme.text }]}>Active Incident</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Active</Text>
       </View>
 
       <View style={styles.grid}>

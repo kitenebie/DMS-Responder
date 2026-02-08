@@ -1,16 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  TextInput,
-  StyleSheet,
-  Modal,
-  ScrollView,
-  StatusBar,
-  Platform,
-  Image,
-} from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet, Modal, ScrollView, StatusBar, Platform, Image } from 'react-native';
 import { HistoryFilter, HistoricalIncident, ChatMessage } from '@/types';
 import { formatDate, formatTime, getTheme } from '@/utils';
 import { fetchHistoricalIncidents, fetchChatMessages, STATUS_COLORS, STATUS_FLOW } from '@/mockData';
@@ -32,15 +21,15 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [chatVisible, setChatVisible] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatIncidentId, setChatIncidentId] = useState<string | null>(null);
   const theme = getTheme(isDarkMode);
 
   useEffect(() => {
     if (!visible) {
       return;
     }
-
     let isMounted = true;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let intervalId: NodeJS.Timeout | null = null;
 
     const loadHistory = async () => {
       setLoading(true);
@@ -62,7 +51,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
     };
 
     loadHistory();
-    intervalId = setInterval(loadHistory, 15000);
+    intervalId = setInterval(loadHistory, 180000);
 
     return () => {
       isMounted = false;
@@ -108,6 +97,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
   };
 
   const openChatForIncident = (id: string) => {
+    setChatIncidentId(id);
     setChatVisible(true);
     fetchChatMessages(id).then((messages) => {
       setChatMessages(messages);
@@ -119,8 +109,18 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
   };
 
   return (
-    <Modal transparent={false} visible={visible} animationType="slide" statusBarTranslucent={false}>
+    <Modal
+      transparent={false}
+      visible={visible}
+      animationType="slide"
+      statusBarTranslucent={false}
+    >
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.surface}
+      />
       <View style={[styles.container, { backgroundColor: theme.background }]}>
+        {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <Pressable onPress={onClose} style={[styles.backButton, { backgroundColor: theme.surfaceAlt }]}>
             <Icon name="close" size={24} color={theme.text} />
@@ -139,6 +139,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
           <View style={styles.headerRight} />
         </View>
 
+        {/* Search & Filters */}
         <View style={[styles.filterSection, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
           <View style={[styles.searchContainer, { backgroundColor: theme.surfaceAlt }]}>
             <Icon name="search" size={20} color={theme.textSecondary} />
@@ -218,6 +219,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
           </View>
         </View>
 
+        {/* Incident List */}
         <ScrollView
           style={[styles.listContainer, { backgroundColor: theme.background }]}
           contentContainerStyle={styles.listContent}
@@ -293,26 +295,37 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
 
                 {expandedIds.includes(String(incident.id)) && (
                   <View style={[styles.expandedSection, { borderTopColor: theme.border }]}>
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>Time Completed</Text>
+                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+                      Time Completed
+                    </Text>
                     <Text style={[styles.expandedValue, { color: theme.text }]}>
                       {incident.time_completed
                         ? `${formatDate(incident.time_completed)} at ${formatTime(incident.time_completed)}`
                         : 'Not completed'}
                     </Text>
 
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>Action Taken</Text>
+                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+                      Action Taken
+                    </Text>
                     <Text style={[styles.expandedValue, { color: theme.text }]}>
                       {incident.actions_taken || 'None'}
                     </Text>
-
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>Additional Notes</Text>
+                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+                      Additional Notes
+                    </Text>
                     <Text style={[styles.expandedValue, { color: theme.text }]}>
                       {incident.additional_notes || 'None'}
                     </Text>
 
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>Photo</Text>
+                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+                      Photo
+                    </Text>
                     {incident.photo_path ? (
-                      <Image source={{ uri: incident.photo_path }} style={styles.photoPreview} resizeMode="cover" />
+                      <Image
+                        source={{ uri: incident.photo_path }}
+                        style={styles.photoPreview}
+                        resizeMode="cover"
+                      />
                     ) : (
                       <Text style={[styles.expandedValue, { color: theme.text }]}>None</Text>
                     )}

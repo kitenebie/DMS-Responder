@@ -24,7 +24,7 @@ const DocumentIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?:
 
 const TimeIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-    <Path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.8 8zm59 8-.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z" />
+    <Path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />
   </Svg>
 );
 
@@ -61,6 +61,24 @@ const ChevronRightIcon = ({ size = 24, color = '#9CA3AF' }: { size?: number; col
 const SendIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
     <Path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+  </Svg>
+);
+
+const PaperclipIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M21 8.5l-9.5 9.5a5 5 0 1 1-7.07-7.07L14 1.34a3.5 3.5 0 1 1 4.95 4.95L9.88 15.32a2 2 0 1 1-2.83-2.83L15.5 4"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+const CameraIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M20 5h-3.17l-1.84-2H9.01L7.17 5H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm-8 13a4 4 0 1 1 0-8 4 4 0 0 1 0 8z" />
   </Svg>
 );
 
@@ -218,6 +236,10 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', 
       return <ChevronRightIcon {...iconProps} />;
     case 'send':
       return <SendIcon {...iconProps} />;
+    case 'paperclip':
+      return <PaperclipIcon {...iconProps} />;
+    case 'camera':
+      return <CameraIcon {...iconProps} />;
     case 'search':
       return <SearchIcon {...iconProps} />;
     case 'chat':

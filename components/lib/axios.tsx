@@ -93,18 +93,48 @@ interface LocationPayload {
   lng: number;
 }
 
-export const sendLocation = async (location: LocationPayload): Promise<boolean> => {
+let locationInterval: ReturnType<typeof setInterval> | null = null;
+
+const sendLocationOnce = async (location: LocationPayload): Promise<boolean> => {
+  console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}`);
+  const response = await api.post('/responder/location', {
+    lat: location.lat,
+    lng: location.lng,
+  });
+  console.log(`[Location] Location sent successfully! Status: ${response.status}`);
+  return response.status === 200 || response.status === 201;
+};
+
+export const sendLocation = async (
+  location: LocationPayload,
+  options: { intervalMs?: number; repeat?: boolean } = { intervalMs: 3000, repeat: true }
+): Promise<boolean> => {
   try {
-    console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}`);
-    const response = await api.post('/responder/location', {
-      lat: location.lat,
-      lng: location.lng,
-    });
-    
-    console.log(`[Location] Location sent successfully! Status: ${response.status}`);
-    return response.status === 200 || response.status === 201;
+    const initialSent = await sendLocationOnce(location);
+
+    if (options.repeat) {
+      if (locationInterval) {
+        clearInterval(locationInterval);
+      }
+      const intervalMs = options.intervalMs ?? 3000;
+      locationInterval = setInterval(() => {
+        sendLocationOnce(location).catch((error: any) => {
+          console.error('[Location] Failed to send location:', error.response?.data || error.message);
+        });
+      }, intervalMs);
+    }
+
+    return initialSent;
   } catch (error: any) {
     console.error('[Location] Failed to send location:', error.response?.data || error.message);
     throw error;
+  }
+};
+
+export const stopLocationUpdates = (): void => {
+  if (locationInterval) {
+    clearInterval(locationInterval);
+    locationInterval = null;
+    console.log('[Location] Location updates stopped');
   }
 };

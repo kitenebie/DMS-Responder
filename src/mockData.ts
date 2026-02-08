@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from 'lib/axios';
+import { api } from '../components/lib/axios';
 import { ip } from 'lib/Domain';
 import {
   Incident,
@@ -16,7 +16,8 @@ export const getCurrentStatus = (statusData: ReportStatus | null): IncidentStatu
   if (!statusData) return 'Pending';
 
   // Check for completed status
-  if (statusData.cleared_at || statusData.completed_at) return 'Completed';
+  if (statusData.cleared_at) return 'Cleared';
+  if (statusData.completed_at) return 'Completed';
 
   // Check for arrived status
   if (statusData.arrived_at) return 'Arrived';
@@ -46,10 +47,20 @@ export const fetchReportStatus = async (reportId?: string): Promise<ReportStatus
 };
 
 // Update report status via API
-export const updateReportStatus = async (): Promise<boolean> => {
+export const updateReportStatus = async (
+  payload?: { status?: IncidentStatus; reportId?: string | number }
+): Promise<boolean> => {
   try {
     console.log('Updating report status via /responder/report/update/status...');
-    await api.post(`/responder/report/update/status`);
+    const body: Record<string, any> = {};
+    if (payload?.status) {
+      body.status = payload.status;
+    }
+    if (payload?.reportId !== undefined && payload?.reportId !== null) {
+      const match = String(payload.reportId).match(/\d+/);
+      body.reportId = match ? Number(match[0]) : payload.reportId;
+    }
+    await api.post(`/responder/report/update/status`, body);
     console.log('Report status updated successfully');
     return true;
   } catch (error: any) {
@@ -108,6 +119,32 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
 
       // FIX: get first item from array
       const report = Array.isArray(reportDetails) ? reportDetails[0] : reportDetails;
+      const hasValidReport =
+        report &&
+        (report?.id ||
+          report?.title ||
+          report?.location ||
+          report?.coordinates ||
+          report?.description);
+
+      if (!hasValidReport) {
+        return {
+          id: '0',
+          type: null,
+          location: null,
+          coordinates: null,
+          timeReported: null,
+          description: null,
+          priority: null,
+          caller: null,
+          callerPhone: null,
+          icon: 'warning',
+          report_attachment: '',
+          isAccepted: false,
+          receiver_id: null,
+          dispatcher_id: null,
+        };
+      }
 
       const coordinates = {
         lat: report?.coordinates?.lat ?? 0,
@@ -132,6 +169,8 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
 
         report_attachment: report?.image_path ? `${ip}/storage/${report.image_path}` : '',
         isAccepted: response.data.is_accepted || false,
+        receiver_id: report?.receiver_id ?? report?.dispatcher_id ?? report?.user_id ?? null,
+        dispatcher_id: report?.dispatcher_id ?? null,
       };
     }
 
@@ -149,6 +188,8 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
       icon: 'warning',
       report_attachment: '',
       isAccepted: false,
+      receiver_id: null,
+      dispatcher_id: null,
     };
   } catch (error) {
     console.log('Error fetching incident:', error);
@@ -166,6 +207,8 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
       icon: 'warning',
       report_attachment: '',
       isAccepted: false,
+      receiver_id: null,
+      dispatcher_id: null,
     };
   }
 };
@@ -308,7 +351,12 @@ export const addChatMessage = async (
 
     await api.post('/responder/sendChat', payload, config);
   } catch (err) {
-    console.warn('Failed to add chat message:', err);
+    const error: any = err;
+    if (error?.response) {
+      console.warn('Failed to add chat message:', error.response.status, error.response.data);
+    } else {
+      console.warn('Failed to add chat message:', error);
+    }
     throw err;
   }
 };

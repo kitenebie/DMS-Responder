@@ -8,6 +8,7 @@ import { getTheme } from '@/utils';
 interface QuickAccessProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
+  onOpenStatus?: () => void;
   currentStatus: IncidentStatus;
   isDarkMode: boolean;
   onUpdateStatus: (newStatus: IncidentStatus) => void;
@@ -16,6 +17,7 @@ interface QuickAccessProps {
 export const QuickAccess: React.FC<QuickAccessProps> = ({
   onOpenChat,
   onOpenHistory,
+  onOpenStatus,
   currentStatus,
   isDarkMode,
   onUpdateStatus,
@@ -24,6 +26,10 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
   const theme = getTheme(isDarkMode);
 
   const handleOpenStatus = () => {
+    if (onOpenStatus) {
+      onOpenStatus();
+      return;
+    }
     setShowStatusModal(true);
   };
 
@@ -32,6 +38,12 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
   };
 
   const handleStatusUpdate = (newStatus: IncidentStatus) => {
+    // StatusTracker calls onUpdateStatus on mount with current status.
+    // Avoid closing the modal unless the status actually changes.
+    if (newStatus === currentStatus) {
+      onUpdateStatus(newStatus);
+      return;
+    }
     onUpdateStatus(newStatus);
     setShowStatusModal(false);
   };

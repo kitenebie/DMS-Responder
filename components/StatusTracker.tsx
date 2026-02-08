@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Modal, ScrollView, KeyboardAvoidingView, Platform, Dimensions, Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Modal, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { IncidentStatus, ReportStatus, ReportForm } from '@/types';
 import {
   STATUS_FLOW,
@@ -128,7 +127,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
     console.log(`Updating status to: ${pendingStatus}`);
 
     try {
-      const success = await updateReportStatus();
+      const success = await updateReportStatus({ status: pendingStatus, reportId: incidentId ?? undefined });
       if (success) {
         // Notify parent component
         onUpdateStatus(pendingStatus);
@@ -187,35 +186,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
     setPhotoUri(null);
   };
 
-  // Request camera permission
-  const requestCameraPermission = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Camera permission is required to take photos.');
-      return false;
-    }
-    return true;
-  };
-
-  // Take photo with camera
-  const handleTakePhoto = async () => {
-    const hasPermission = await requestCameraPermission();
-    if (!hasPermission) return;
-
-    try {
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        setPhotoUri(result.assets[0].uri);
-      }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    }
+  const handlePhotoCaptured = (uri: string) => {
+    setPhotoUri(uri);
   };
 
   // Remove photo
@@ -532,7 +504,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                   onUpdateForm={handleReportFormUpdate}
                   onSubmit={handleReportFormSubmit}
                   photoUri={photoUri}
-                  onTakePhoto={handleTakePhoto}
+                  onPhotoCaptured={handlePhotoCaptured}
                   onRemovePhoto={handleRemovePhoto}
                   submitting={submittingForm}
                   isDarkMode={isDarkMode}
@@ -699,17 +671,16 @@ const styles = StyleSheet.create({
   },
   reportFormModalContent: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    width: '90%',
-    maxHeight: Dimensions.get('window').height * 0.75,
-    borderWidth: 1,
-    borderColor: '#10B981',
+    borderRadius: 0,
+    padding: 0,
+    width: '100%',
+    height: '100%',
+    borderWidth: 0,
   },
   modalOverlayInner: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
     width: '100%',
   },
   scrollContent: {
