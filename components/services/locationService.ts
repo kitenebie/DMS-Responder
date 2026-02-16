@@ -1,6 +1,7 @@
 // services/locationService.ts
 import axios, { AxiosInstance } from 'axios';
 import * as Location from 'expo-location';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 export interface LocationCoords {
   latitude: number;
@@ -62,7 +63,42 @@ class LocationService {
 
   async requestPermission(askAgain = true): Promise<boolean> {
     try {
-      // Check current permission status first
+      if (Platform.OS === 'android') {
+        const fine = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+        const coarse = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION
+        );
+        let androidGranted = fine || coarse;
+
+        if (!androidGranted && askAgain) {
+          const result = await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+          ]);
+          androidGranted =
+            result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
+              PermissionsAndroid.RESULTS.GRANTED ||
+            result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
+              PermissionsAndroid.RESULTS.GRANTED;
+        }
+
+        this.locationState.permissionStatus = {
+          status: androidGranted
+            ? Location.PermissionStatus.GRANTED
+            : Location.PermissionStatus.DENIED,
+          canAskAgain: askAgain,
+        } as Location.LocationPermissionResponse;
+
+        if (!androidGranted) {
+          console.log('Location permission denied on Android');
+        }
+
+        return androidGranted;
+      }
+
+      // iOS / other platforms use Expo permission flow
       const currentStatus = await Location.getForegroundPermissionsAsync();
 
       if (currentStatus.status === Location.PermissionStatus.GRANTED) {
@@ -75,7 +111,6 @@ class LocationService {
         return false;
       }
 
-      // Request permission
       const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
       this.locationState.permissionStatus = {
         status,
@@ -83,7 +118,6 @@ class LocationService {
       } as Location.LocationPermissionResponse;
 
       const granted = status === Location.PermissionStatus.GRANTED;
-
       if (!granted) {
         console.log(`Location permission ${status}. Can ask again: ${canAskAgain}`);
       }

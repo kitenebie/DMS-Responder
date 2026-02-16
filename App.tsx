@@ -100,7 +100,13 @@ const AppContent = () => {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    const reportIdRaw = state.activeIncident?.id;
+    const reportIdMatch = String(reportIdRaw ?? '').match(/\d+/);
+    const reportIdValue = reportIdMatch ? Number(reportIdMatch[0]) : undefined;
+    const hasValidReportId = Number.isFinite(reportIdValue) && reportIdValue > 0;
+    const shouldSendLocation = isLoggedIn;
+
+    if (!shouldSendLocation) {
       stopLocationUpdates();
       return;
     }
@@ -117,7 +123,8 @@ const AppContent = () => {
         if (!isMounted) return;
         await sendLocation(
           { lat: location.latitude, lng: location.longitude },
-          { repeat: false }
+          { repeat: false },
+          hasValidReportId ? reportIdValue : undefined
         );
       } catch (error) {
         console.log('[Location] Failed to send location:', error);
@@ -127,7 +134,7 @@ const AppContent = () => {
     };
 
     sendCurrentLocation();
-    intervalId = setInterval(sendCurrentLocation, 3000);
+    intervalId = setInterval(sendCurrentLocation, 2800);
 
     return () => {
       isMounted = false;
@@ -136,7 +143,7 @@ const AppContent = () => {
       }
       stopLocationUpdates();
     };
-  }, [isLoggedIn]);
+  }, [isLoggedIn, state.currentStatus, state.activeIncident?.id]);
 
   // Auto-login on app start
   useEffect(() => {
@@ -402,49 +409,6 @@ const AppContent = () => {
     },
     [state.activeIncident]
   );
-
-  const handleUpdateReportForm = useCallback((field: keyof ReportFormType, value: string) => {
-    setState((prev) => ({
-      ...prev,
-      reportForm: {
-        ...prev.reportForm,
-        [field]: value,
-      },
-    }));
-  }, []);
-
-  const handleSubmitReport = useCallback(async () => {
-    try {
-      const incidentId = state.activeIncident?.id ?? undefined;
-      await submitReportForm(state.reportForm, photoUri, incidentId);
-      Alert.alert('Success', 'Report submitted successfully!');
-      setState((prev) => ({
-        ...prev,
-        reportForm: {
-          actionsTaken: '',
-          timeArrived: '',
-          timeCompleted: '',
-          additionalNotes: '',
-        },
-      }));
-      setPhotoUri(null);
-    } catch (error: any) {
-      Alert.alert(
-        'Error',
-        error.response?.data?.message || 'Failed to submit report. Please try again.'
-      );
-    }
-  }, [state.reportForm, photoUri, state.activeIncident]);
-
-  const handlePhotoCaptured = useCallback((uri: string) => {
-    setPhotoUri(uri);
-  }, []);
-
-  // Remove photo
-  const handleRemovePhoto = useCallback(() => {
-    setPhotoUri(null);
-  }, []);
-
   const theme = {
     background: isDarkMode ? '#0F172A' : '#F8FAFC',
     surface: isDarkMode ? '#1E293B' : '#FFFFFF',
@@ -649,17 +613,6 @@ const AppContent = () => {
                   isDarkMode={isDarkMode}
                 />
               </View>
-              {state.currentStatus === 'Arrived' && (
-                <ReportForm
-                  form={state.reportForm}
-                  onUpdateForm={handleUpdateReportForm}
-                  onSubmit={handleSubmitReport}
-                  photoUri={photoUri}
-                  onPhotoCaptured={handlePhotoCaptured}
-                  onRemovePhoto={handleRemovePhoto}
-                  isDarkMode={isDarkMode}
-                />
-              )}
               <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleToggleHistory} />
             </>
           ) : (

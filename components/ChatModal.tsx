@@ -17,7 +17,6 @@ import { ChatMessage } from '@/types';
 import { getTheme } from '@/utils';
 import { Icon } from './Icon';
 import { CameraCaptureModal } from './CameraCaptureModal';
-import api from 'lib/axios';
 
 interface ChatModalProps {
   visible: boolean;
@@ -45,6 +44,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   const scrollRef = useRef<ScrollView>(null);
   const theme = getTheme(isDarkMode);
   const keyboardOffset = Platform.OS === 'ios' ? 0 : (StatusBar.currentHeight ?? 0) + 8;
+  const canSend = !readOnly && (inputText.trim().length > 0 || selectedImages.length > 0);
 
   useEffect(() => {
     if (visible && messages.length > 0) {
@@ -55,16 +55,20 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   }, [visible, messages]);
 
   const handleSend = async () => {
-    if (readOnly) return;
-    if (!inputText.trim() && selectedImages.length === 0) return;
+    if (readOnly || isSending) return;
+    const trimmedMessage = inputText.trim();
+    const imagesToSend = [...selectedImages];
+    if (!trimmedMessage && imagesToSend.length === 0) return;
 
     setIsSending(true);
+    setInputText('');
+    setSelectedImages([]);
     try {
-      await onSendMessage(inputText.trim(), selectedImages);
-      setInputText('');
-      setSelectedImages([]);
+      await Promise.resolve(onSendMessage(trimmedMessage, imagesToSend));
     } catch (err) {
       console.warn('Failed to send message:', err);
+      setInputText(trimmedMessage);
+      setSelectedImages(imagesToSend);
     } finally {
       setIsSending(false);
     }
@@ -239,11 +243,15 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 value={inputText}
                 onChangeText={setInputText}
                 onSubmitEditing={handleSend}
+                returnKeyType="send"
               />
               <Pressable
                 onPress={handleSend}
-                style={[styles.sendButton, isSending && styles.sendButtonDisabled]}
-                disabled={isSending}
+                style={[
+                  styles.sendButton,
+                  (!canSend || isSending) && styles.sendButtonDisabled,
+                ]}
+                disabled={!canSend || isSending}
               >
                 <Icon name="send" size={20} color="#fff" />
               </Pressable>

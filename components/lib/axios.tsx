@@ -95,22 +95,31 @@ interface LocationPayload {
 
 let locationInterval: ReturnType<typeof setInterval> | null = null;
 
-const sendLocationOnce = async (location: LocationPayload): Promise<boolean> => {
+const sendLocationOnce = async (
+  location: LocationPayload,
+  reportId?: string | number | null
+): Promise<boolean> => {
   console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}`);
-  const response = await api.post('/responder/location', {
+  const payload: Record<string, any> = {
     lat: location.lat,
     lng: location.lng,
-  });
-  console.log(`[Location] Location sent successfully! Status: ${response.status}`);
+  };
+
+  if (reportId !== undefined && reportId !== null && String(reportId).trim() !== '') {
+    payload.report_id = reportId;
+  }
+
+  const response = await api.post('/responder/location', payload);
   return response.status === 200 || response.status === 201;
 };
 
 export const sendLocation = async (
   location: LocationPayload,
-  options: { intervalMs?: number; repeat?: boolean } = { intervalMs: 3000, repeat: true }
+  options: { intervalMs?: number; repeat?: boolean } = { intervalMs: 3000, repeat: true },
+  reportId?: string | number | null
 ): Promise<boolean> => {
   try {
-    const initialSent = await sendLocationOnce(location);
+    const initialSent = await sendLocationOnce(location, reportId);
 
     if (options.repeat) {
       if (locationInterval) {
@@ -118,7 +127,7 @@ export const sendLocation = async (
       }
       const intervalMs = options.intervalMs ?? 3000;
       locationInterval = setInterval(() => {
-        sendLocationOnce(location).catch((error: any) => {
+        sendLocationOnce(location, reportId).catch((error: any) => {
           console.error('[Location] Failed to send location:', error.response?.data || error.message);
         });
       }, intervalMs);

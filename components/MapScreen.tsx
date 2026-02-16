@@ -141,6 +141,8 @@ const MapScreen = memo(function MapScreen({
   const [initialCenter, setInitialCenter] = useState<[number, number] | null>(null);
   const [userLocation, setUserLocation] = useState<LocationCoords | null>(null);
   const [userAddress, setUserAddress] = useState<string>('Getting location...');
+  const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const routeGeometry = useRouteStore((state) => state.routeGeometry);
   const routeSteps = useRouteStore((state) => state.routeSteps);
   const isRouteLoading = useRouteStore((state) => state.isRouteLoading);
@@ -190,13 +192,24 @@ const MapScreen = memo(function MapScreen({
   useEffect(() => {
     let isMounted = true;
 
-    locationService.getCurrentLocation().then((location) => {
+    (async () => {
+      const granted = await locationService.requestPermission();
+      if (!isMounted) return;
+
+      setHasLocationPermission(granted);
+      setPermissionMessage(
+        granted ? null : 'Location permission is required to show your position.'
+      );
+
+      const location = granted
+        ? await locationService.getCurrentLocation()
+        : locationService.getDefaultLocation();
       if (!isMounted) return;
 
       setUserLocation(location);
       fetchUserAddress(location.latitude, location.longitude);
       setInitialCenter([location.longitude, location.latitude]);
-    });
+    })();
 
     return () => {
       isMounted = false;
@@ -301,15 +314,17 @@ const MapScreen = memo(function MapScreen({
             centerCoordinate: initialCenter ?? [124.02982096568188, 12.706220102613308],
             zoomLevel: 16,
           }}
-          followUserLocation={isFollowingUser}
+          followUserLocation={isFollowingUser && hasLocationPermission}
         />
-        <UserLocation
-          visible={true}
-          renderMode={renderMode}
-          androidRenderMode={androidRenderMode}
-          showsUserHeadingIndicator={true}
-          onUpdate={handleCameraUserLocationChange}
-        />
+        {hasLocationPermission && (
+          <UserLocation
+            visible={true}
+            renderMode={renderMode}
+            androidRenderMode={androidRenderMode}
+            showsUserHeadingIndicator={true}
+            onUpdate={handleCameraUserLocationChange}
+          />
+        )}
 
         {/* Walking Route Polyline */}
         {routeGeometry && (
@@ -362,6 +377,12 @@ const MapScreen = memo(function MapScreen({
           <Text style={[styles.routeLoadingText, isDarkMode && styles.routeLoadingTextDark]}>
             Fetching route...
           </Text>
+        </View>
+      )}
+
+      {permissionMessage && (
+        <View style={styles.permissionError}>
+          <Text style={styles.permissionErrorText}>{permissionMessage}</Text>
         </View>
       )}
 

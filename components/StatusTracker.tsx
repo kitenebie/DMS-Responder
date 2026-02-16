@@ -12,6 +12,7 @@ import { getTheme } from '@/utils';
 import { submitReportForm } from './lib/axios';
 import { Icon } from './Icon';
 import { ReportForm as ReportFormComponent } from './ReportForm';
+import { he } from 'filepond/locale/he-he';
 
 interface StatusTrackerProps {
   incidentId?: string|null;
@@ -495,10 +496,6 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                 { backgroundColor: theme.surface, borderColor: theme.border },
               ]}
               onPress={(e) => e.stopPropagation()}>
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.scrollContent}>
                 <ReportFormComponent
                   form={reportFormData}
                   onUpdateForm={handleReportFormUpdate}
@@ -508,13 +505,15 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                   onRemovePhoto={handleRemovePhoto}
                   submitting={submittingForm}
                   isDarkMode={isDarkMode}
+                  incidentId={incidentId}
                 />
+                <View style={[styles.modalButtonContainer]}>
                 <Pressable
                   style={[styles.modalButton, styles.cancelButton, { marginTop: 16 }]}
                   onPress={cancelReportForm}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </Pressable>
-              </ScrollView>
+                </View>
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -649,8 +648,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  modalButtonContainer:{
+    position: 'absolute',
+    bottom: 0,
+    alignSelf: 'center',
+    padding: 4,
+    width: '100%',
+    backgroundColor: '#0F172A',
+    height: 100,
+  },
   modalButton: {
-    flex: 1,
+    alignSelf: 'center',
+    width: '100%',
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
@@ -676,14 +685,12 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderWidth: 0,
+    paddingBottom: 100,
   },
   modalOverlayInner: {
     flex: 1,
     justifyContent: 'flex-start',
     alignItems: 'stretch',
     width: '100%',
-  },
-  scrollContent: {
-    paddingBottom: 20,
   },
 });
