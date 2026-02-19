@@ -45,6 +45,13 @@ export interface HistoricalIncident {
   photo_path?: string | null;
 }
 
+export interface HistoricalIncidentsPage {
+  items: HistoricalIncident[];
+  total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+}
+
 export interface ChatMessage {
   id: number;
   sender: string;

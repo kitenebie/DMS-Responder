@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, Modal, ScrollView, StatusBar, Platform, Image } from 'react-native';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { View, Text, Pressable, TextInput, StyleSheet, Modal, ScrollView, StatusBar, Platform, Image, FlatList, ActivityIndicator } from 'react-native';
 import { HistoryFilter, HistoricalIncident, ChatMessage } from '@/types';
 import { formatDate, formatTime, getTheme } from '@/utils';
-import { fetchHistoricalIncidents, fetchChatMessages, STATUS_COLORS, STATUS_FLOW } from '@/mockData';
+import { fetchHistoricalIncidents, fetchChatMessages, STATUS_COLORS, STATUS_FLOW, HISTORY_PAGE_SIZE } from '@/mockData';
 import { Icon } from './Icon';
 import { ChatModal } from './ChatModal';
 
@@ -17,49 +17,116 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
   const [filter, setFilter] = useState<HistoryFilter>({ type: 'all', status: 'all' });
   const [incidents, setIncidents] = useState<HistoricalIncident[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(0);
+  const [totalCount, setTotalCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [chatVisible, setChatVisible] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [chatIncidentId, setChatIncidentId] = useState<string | null>(null);
   const theme = getTheme(isDarkMode);
+  const loadingRef = useRef(loading);
+  const loadingMoreRef = useRef(loadingMore);
+  const hasMoreRef = useRef(hasMore);
+  const nextOffsetRef = useRef(nextOffset);
+  const filteredCountRef = useRef(0);
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    nextOffsetRef.current = nextOffset;
+  }, [nextOffset]);
+
+  const withTimeout = useCallback(
+    async (offset: number) => {
+      return Promise.race([
+        fetchHistoricalIncidents({ limit: HISTORY_PAGE_SIZE, offset }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('History request timed out')), 12000)
+        ),
+      ]);
+    },
+    []
+  );
+
+  const loadInitialHistory = useCallback(async () => {
+    loadingRef.current = true;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const page = await withTimeout(0);
+      setIncidents(page.items);
+      setTotalCount(page.total);
+      setHasMore(page.hasMore);
+      setNextOffset(page.nextOffset);
+    } catch {
+      setIncidents([]);
+      setTotalCount(0);
+      setHasMore(false);
+      setNextOffset(null);
+      setLoadError('Failed to load history. Please try again.');
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+    }
+  }, [withTimeout]);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (
+      loadingRef.current ||
+      loadingMoreRef.current ||
+      !hasMoreRef.current ||
+      nextOffsetRef.current === null
+    ) {
+      return;
+    }
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const offset = nextOffsetRef.current;
+      if (offset === null) {
+        return;
+      }
+      const page = await withTimeout(offset);
+      setIncidents((prev) => {
+        const existing = new Set(prev.map((item) => item.id));
+        const merged = [...prev];
+        page.items.forEach((item) => {
+          if (!existing.has(item.id)) {
+            merged.push(item);
+          }
+        });
+        return merged;
+      });
+      setTotalCount(page.total);
+      setHasMore(page.hasMore);
+      setNextOffset(page.nextOffset);
+    } catch {
+      setLoadError('Failed to load more history.');
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [withTimeout]);
 
   useEffect(() => {
     if (!visible) {
       return;
     }
-    let isMounted = true;
-    let intervalId: NodeJS.Timeout | null = null;
-
-    const loadHistory = async () => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const data = await fetchHistoricalIncidents();
-        if (isMounted) {
-          setIncidents(data);
-        }
-      } catch {
-        if (isMounted) {
-          setLoadError('Failed to load history');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadHistory();
-    intervalId = setInterval(loadHistory, 180000);
-
-    return () => {
-      isMounted = false;
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [visible]);
+    loadInitialHistory();
+  }, [visible, loadInitialHistory]);
 
   const incidentTypes = useMemo(() => {
     return [...new Set(incidents.map((i) => i.type))];
@@ -90,6 +157,40 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
     return result;
   }, [searchText, filter, incidents]);
 
+  useEffect(() => {
+    filteredCountRef.current = filteredIncidents.length;
+  }, [filteredIncidents.length]);
+
+  const loadMoreHistoryRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    loadMoreHistoryRef.current = () => {
+      void loadMoreHistory();
+    };
+  }, [loadMoreHistory]);
+
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+      if (filteredCountRef.current === 0) {
+        return;
+      }
+
+      const lastVisibleIndex = viewableItems.reduce((max, viewableItem) => {
+        if (typeof viewableItem.index !== 'number') {
+          return max;
+        }
+        return Math.max(max, viewableItem.index);
+      }, -1);
+
+      if (lastVisibleIndex >= filteredCountRef.current - 1) {
+        loadMoreHistoryRef.current();
+      }
+    }
+  ).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60,
+  }).current;
+
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -97,12 +198,105 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
   };
 
   const openChatForIncident = (id: string) => {
-    setChatIncidentId(id);
     setChatVisible(true);
     fetchChatMessages(id).then((messages) => {
       setChatMessages(messages);
     });
   };
+
+  const renderIncident = ({ item: incident }: { item: HistoricalIncident }) => (
+    <View
+      style={[
+        styles.incidentCard,
+        { backgroundColor: theme.surface, borderColor: theme.border },
+      ]}
+    >
+      <View style={styles.incidentHeader}>
+        <View>
+          <Text style={[styles.incidentId, { color: theme.text }]}>{incident.id}</Text>
+          <Text style={[styles.incidentType, { color: theme.textSecondary }]}>
+            {incident.type}
+          </Text>
+        </View>
+        <View style={styles.incidentHeaderRight}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: STATUS_COLORS[incident.status] },
+            ]}
+          >
+            <Text style={styles.statusText}>{incident.status}</Text>
+          </View>
+          <Pressable
+            onPress={() => openChatForIncident(String(incident.id))}
+            style={[styles.chatButton, { borderColor: theme.border }]}
+          >
+            <Icon name="chat" size={14} color={theme.text} />
+          </Pressable>
+        </View>
+      </View>
+      <View style={styles.incidentRow}>
+        <Icon name="location" size={14} color={theme.textSecondary} />
+        <Text style={[styles.incidentLocation, { color: theme.textSecondary }]}>
+          {incident.location}
+        </Text>
+      </View>
+      <Text style={[styles.incidentTime, { color: theme.textSecondary }]}>
+        {formatDate(incident.timeReported)} at {formatTime(incident.timeReported)}
+      </Text>
+      <Text style={[styles.incidentDescription, { color: theme.textSecondary }]}>
+        {incident.description}
+      </Text>
+
+      <Pressable
+        onPress={() => toggleExpanded(String(incident.id))}
+        style={[styles.expandButton, { borderColor: theme.border }]}
+      >
+        <Text style={[styles.expandButtonText, { color: theme.text }]}>
+          {expandedIds.includes(String(incident.id)) ? 'Hide details' : 'Show details'}
+        </Text>
+      </Pressable>
+
+      {expandedIds.includes(String(incident.id)) && (
+        <View style={[styles.expandedSection, { borderTopColor: theme.border }]}>
+          <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+            Time Completed
+          </Text>
+          <Text style={[styles.expandedValue, { color: theme.text }]}>
+            {incident.time_completed
+              ? `${formatDate(incident.time_completed)} at ${formatTime(incident.time_completed)}`
+              : 'Not completed'}
+          </Text>
+
+          <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+            Action Taken
+          </Text>
+          <Text style={[styles.expandedValue, { color: theme.text }]}>
+            {incident.actions_taken || 'None'}
+          </Text>
+          <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+            Additional Notes
+          </Text>
+          <Text style={[styles.expandedValue, { color: theme.text }]}>
+            {incident.additional_notes || 'None'}
+          </Text>
+
+          <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
+            Photo
+          </Text>
+          {incident.photo_path ? (
+            <Image
+              source={{ uri: incident.photo_path }}
+              style={styles.photoPreview}
+              resizeMode="cover"
+            />
+          ) : (
+            <Text style={[styles.expandedValue, { color: theme.text }]}>None</Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
   const handleSendHistoryMessage = async (_message: string, _images: string[]) => {
     return;
@@ -114,6 +308,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
       visible={visible}
       animationType="slide"
       statusBarTranslucent={false}
+      onRequestClose={onClose}
     >
       <StatusBar
         barStyle={isDarkMode ? 'light-content' : 'dark-content'}
@@ -122,7 +317,11 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
       <View style={[styles.container, { backgroundColor: theme.background }]}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          <Pressable onPress={onClose} style={[styles.backButton, { backgroundColor: theme.surfaceAlt }]}>
+          <Pressable
+            onPress={onClose}
+            hitSlop={8}
+            style={[styles.backButton, { backgroundColor: theme.surfaceAlt }]}
+          >
             <Icon name="close" size={24} color={theme.text} />
           </Pressable>
           <View style={styles.headerCenter}>
@@ -132,11 +331,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
             <View>
               <Text style={[styles.headerTitle, { color: theme.text }]}>Incident History</Text>
               <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>
-                {filteredIncidents.length} records
+                {filteredIncidents.length}
+                {totalCount > 0 ? ` of ${totalCount}` : ''} records
               </Text>
             </View>
           </View>
-          <View style={styles.headerRight} />
+          <View style={styles.headerSpacer} />
         </View>
 
         {/* Search & Filters */}
@@ -220,121 +420,40 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
         </View>
 
         {/* Incident List */}
-        <ScrollView
+        <FlatList
+          data={filteredIncidents}
+          keyExtractor={(item) => item.id}
+          renderItem={renderIncident}
           style={[styles.listContainer, { backgroundColor: theme.background }]}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
-        >
-          {loading ? (
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Loading history...</Text>
-            </View>
-          ) : loadError ? (
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>{loadError}</Text>
-            </View>
-          ) : filteredIncidents.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Icon name="document" size={48} color={theme.textSecondary} />
-              <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No incidents found</Text>
-            </View>
-          ) : (
-            filteredIncidents.map((incident) => (
-              <View
-                key={incident.id}
-                style={[
-                  styles.incidentCard,
-                  { backgroundColor: theme.surface, borderColor: theme.border },
-                ]}
-              >
-                <View style={styles.incidentHeader}>
-                  <View>
-                    <Text style={[styles.incidentId, { color: theme.text }]}>{incident.id}</Text>
-                    <Text style={[styles.incidentType, { color: theme.textSecondary }]}>
-                      {incident.type}
-                    </Text>
-                  </View>
-                  <View style={styles.headerRight}>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: STATUS_COLORS[incident.status] },
-                      ]}
-                    >
-                      <Text style={styles.statusText}>{incident.status}</Text>
-                    </View>
-                    <Pressable
-                      onPress={() => openChatForIncident(String(incident.id))}
-                      style={[styles.chatButton, { borderColor: theme.border }]}
-                    >
-                      <Icon name="chat" size={14} color={theme.text} />
-                    </Pressable>
-                  </View>
-                </View>
-                <View style={styles.incidentRow}>
-                  <Icon name="location" size={14} color={theme.textSecondary} />
-                  <Text style={[styles.incidentLocation, { color: theme.textSecondary }]}>
-                    {incident.location}
-                  </Text>
-                </View>
-                <Text style={[styles.incidentTime, { color: theme.textSecondary }]}>
-                  {formatDate(incident.timeReported)} at {formatTime(incident.timeReported)}
-                </Text>
-                <Text style={[styles.incidentDescription, { color: theme.textSecondary }]}>
-                  {incident.description}
-                </Text>
-
-                <Pressable
-                  onPress={() => toggleExpanded(String(incident.id))}
-                  style={[styles.expandButton, { borderColor: theme.border }]}
-                >
-                  <Text style={[styles.expandButtonText, { color: theme.text }]}>
-                    {expandedIds.includes(String(incident.id)) ? 'Hide details' : 'Show details'}
-                  </Text>
-                </Pressable>
-
-                {expandedIds.includes(String(incident.id)) && (
-                  <View style={[styles.expandedSection, { borderTopColor: theme.border }]}>
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
-                      Time Completed
-                    </Text>
-                    <Text style={[styles.expandedValue, { color: theme.text }]}>
-                      {incident.time_completed
-                        ? `${formatDate(incident.time_completed)} at ${formatTime(incident.time_completed)}`
-                        : 'Not completed'}
-                    </Text>
-
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
-                      Action Taken
-                    </Text>
-                    <Text style={[styles.expandedValue, { color: theme.text }]}>
-                      {incident.actions_taken || 'None'}
-                    </Text>
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
-                      Additional Notes
-                    </Text>
-                    <Text style={[styles.expandedValue, { color: theme.text }]}>
-                      {incident.additional_notes || 'None'}
-                    </Text>
-
-                    <Text style={[styles.expandedLabel, { color: theme.textSecondary }]}>
-                      Photo
-                    </Text>
-                    {incident.photo_path ? (
-                      <Image
-                        source={{ uri: incident.photo_path }}
-                        style={styles.photoPreview}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <Text style={[styles.expandedValue, { color: theme.text }]}>None</Text>
-                    )}
-                  </View>
-                )}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
+          ListEmptyComponent={
+            loading ? (
+              <View style={styles.emptyState}>
+                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>Loading history...</Text>
               </View>
-            ))
-          )}
-        </ScrollView>
+            ) : loadError ? (
+              <View style={styles.emptyState}>
+                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>{loadError}</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Icon name="document" size={48} color={theme.textSecondary} />
+                <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No incidents found</Text>
+              </View>
+            )
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color="#3B82F6" />
+                <Text style={[styles.footerText, { color: theme.textSecondary }]}>Loading more...</Text>
+              </View>
+            ) : null
+          }
+        />
       </View>
 
       <ChatModal
@@ -395,7 +514,7 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontSize: 12,
   },
-  headerRight: {
+  headerSpacer: {
     width: 44,
   },
   filterSection: {
@@ -459,6 +578,16 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
   },
+  footerLoader: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -482,7 +611,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 8,
   },
-  headerRight: {
+  incidentHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,

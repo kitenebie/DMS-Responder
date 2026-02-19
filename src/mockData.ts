@@ -4,12 +4,15 @@ import { ip } from 'lib/Domain';
 import {
   Incident,
   HistoricalIncident,
+  HistoricalIncidentsPage,
   ChatMessage,
   AppConfig,
   Theme,
   ReportStatus,
   IncidentStatus,
 } from './types';
+
+export const HISTORY_PAGE_SIZE = 10;
 
 // Helper function to determine current status from API response
 export const getCurrentStatus = (statusData: ReportStatus | null): IncidentStatus => {
@@ -213,12 +216,38 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
   }
 };
 
-export const fetchHistoricalIncidents = async (): Promise<HistoricalIncident[]> => {
-  try {
-    const response = await api.get('/responder/History');
-    const data = Array.isArray(response.data) ? response.data : [];
+export const fetchHistoricalIncidents = async (
+  params: { limit?: number; offset?: number } = {}
+): Promise<HistoricalIncidentsPage> => {
+  const limit = Math.min(Math.max(params.limit ?? HISTORY_PAGE_SIZE, 1), HISTORY_PAGE_SIZE);
+  const offset = Math.max(params.offset ?? 0, 0);
 
-    return data.map((item: any) => ({
+  try {
+    const response = await api.get('/responder/History', {
+      params: { limit, offset },
+    });
+
+    const payload = response.data;
+    const data = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
+    const pagination = !Array.isArray(payload) ? payload?.pagination ?? {} : {};
+    const total = Number.isFinite(Number(pagination.total))
+      ? Number(pagination.total)
+      : offset + data.length;
+    const hasMore = typeof pagination.has_more === 'boolean'
+      ? pagination.has_more
+      : data.length === limit;
+    const nextOffset =
+      pagination.next_offset !== undefined && pagination.next_offset !== null
+        ? Number(pagination.next_offset)
+        : hasMore
+        ? offset + data.length
+        : null;
+
+    const items: HistoricalIncident[] = data.map((item: any) => ({
       id: String(item.id ?? ''),
       type: item.type ?? 'Unknown',
       location: item.location ?? 'Unknown',
@@ -231,9 +260,21 @@ export const fetchHistoricalIncidents = async (): Promise<HistoricalIncident[]> 
       additional_notes: item.additional_notes ?? null,
       photo_path: item.photo_path ? `${ip}/storage/${item.photo_path}` : null,
     }));
+
+    return {
+      items,
+      total,
+      hasMore,
+      nextOffset: Number.isFinite(nextOffset) ? nextOffset : null,
+    };
   } catch (error: any) {
     console.error('Error fetching historical incidents:', error.response?.data || error.message);
-    return [];
+    return {
+      items: [],
+      total: 0,
+      hasMore: false,
+      nextOffset: null,
+    };
   }
 };
 

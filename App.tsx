@@ -273,11 +273,28 @@ const AppContent = () => {
     });
   }, []);
 
-  const handleToggleHistory = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      showHistory: !prev.showHistory,
-    }));
+  const handleOpenHistory = useCallback(() => {
+    setState((prev) => {
+      if (prev.showHistory) {
+        return prev;
+      }
+      return {
+        ...prev,
+        showHistory: true,
+      };
+    });
+  }, []);
+
+  const handleCloseHistory = useCallback(() => {
+    setState((prev) => {
+      if (!prev.showHistory) {
+        return prev;
+      }
+      return {
+        ...prev,
+        showHistory: false,
+      };
+    });
   }, []);
 
   const handleToggleTheme = useCallback(() => {
@@ -536,7 +553,7 @@ const AppContent = () => {
 
           <Pressable
             style={[styles.floatingHistoryButton, { backgroundColor: theme.surface }]}
-            onPress={handleToggleHistory}>
+            onPress={handleOpenHistory}>
             <Icon name="history" size={26} color={theme.text} />
           </Pressable>
 
@@ -551,7 +568,7 @@ const AppContent = () => {
 
           <HistoryModal
             visible={state.showHistory}
-            onClose={handleToggleHistory}
+            onClose={handleCloseHistory}
             isDarkMode={isDarkMode}
           />
         </View>
@@ -591,7 +608,7 @@ const AppContent = () => {
               {state.currentStatus !== 'Completed' && (
                 <QuickAccess
                   onOpenChat={handleToggleChat}
-                  onOpenHistory={handleToggleHistory}
+                  onOpenHistory={handleOpenHistory}
                   onOpenStatus={handleScrollToStatus}
                   currentStatus={state.currentStatus}
                   isDarkMode={isDarkMode}
@@ -613,13 +630,13 @@ const AppContent = () => {
                   isDarkMode={isDarkMode}
                 />
               </View>
-              <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleToggleHistory} />
+              <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
             </>
           ) : (
             <View style={styles.noIncidentContainer}>
               <Pressable
                 style={[styles.historyButton, { backgroundColor: theme.surface }]}
-                onPress={handleToggleHistory}>
+                onPress={handleOpenHistory}>
                 <Icon name="history" size={20} color={theme.text} />
                 <Text style={[styles.historyButtonText, { color: theme.text }]}>History</Text>
               </Pressable>
@@ -647,7 +664,7 @@ const AppContent = () => {
 
         <HistoryModal
           visible={state.showHistory}
-          onClose={handleToggleHistory}
+          onClose={handleCloseHistory}
           isDarkMode={isDarkMode}
         />
 
