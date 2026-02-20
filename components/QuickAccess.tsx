@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { Icon } from './Icon';
 import { StatusTracker } from './StatusTracker';
 import { IncidentStatus } from '@/types';
@@ -52,7 +52,7 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
     <>
       <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         {/* Status Quick Access */}
-        <Pressable
+        <TouchableOpacity
           onPress={handleOpenStatus}
           style={styles.quickButton}
         >
@@ -64,12 +64,12 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
             <Text style={[styles.buttonValue, { color: theme.textSecondary }]}>{currentStatus}</Text>
           </View>
           <Icon name="chevron-right" size={16} color={theme.textSecondary} style={styles.chevron} />
-        </Pressable>
+        </TouchableOpacity>
 
         <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
         {/* Chat Quick Access */}
-        <Pressable
+        <TouchableOpacity
           onPress={onOpenChat}
           style={styles.quickButton}
         >
@@ -81,7 +81,7 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
             <Text style={[styles.buttonSubtext, { color: theme.textSecondary }]}>Tap to message</Text>
           </View>
           <Icon name="chevron-right" size={16} color={theme.textSecondary} style={styles.chevron} />
-        </Pressable>
+        </TouchableOpacity>
       </View>
 
       {/* Full Screen Status Modal */}
@@ -93,9 +93,9 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
       >
         <View style={[styles.modalContainer, { backgroundColor: theme.background }]}>
           <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-            <Pressable onPress={handleCloseStatus} style={styles.closeButton}>
+            <TouchableOpacity onPress={handleCloseStatus} style={styles.closeButton}>
               <Icon name="close" size={24} color={theme.text} />
-            </Pressable>
+            </TouchableOpacity>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Update Status</Text>
             <View style={styles.placeholder} />
           </View>

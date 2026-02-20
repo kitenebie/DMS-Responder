@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Icon } from './Icon';
 
@@ -57,12 +57,12 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         {permission?.granted ? (
           <CameraView ref={cameraRef} style={styles.camera} facing="back">
             <View style={styles.topBar}>
-              <Pressable onPress={onClose} style={[styles.iconButton, { backgroundColor: theme.surface }]}>
+              <TouchableOpacity onPress={onClose} style={[styles.iconButton, { backgroundColor: theme.surface }]}>
                 <Icon name="close" size={22} color={theme.text} />
-              </Pressable>
+              </TouchableOpacity>
             </View>
             <View style={styles.controls}>
-              <Pressable
+              <TouchableOpacity
                 onPress={handleCapture}
                 disabled={isCapturing}
                 style={[
@@ -77,15 +77,15 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             <Text style={[styles.permissionText, { color: theme.text }]}>
               Camera permission is required to take photos.
             </Text>
-            <Pressable
+            <TouchableOpacity
               onPress={requestPermission}
               style={[styles.permissionButton, { backgroundColor: '#3B82F6' }]}
             >
               <Text style={styles.permissionButtonText}>Grant Permission</Text>
-            </Pressable>
-            <Pressable onPress={onClose} style={styles.permissionCancel}>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onClose} style={styles.permissionCancel}>
               <Text style={[styles.permissionCancelText, { color: theme.textSecondary }]}>Close</Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.permissionContainer}>

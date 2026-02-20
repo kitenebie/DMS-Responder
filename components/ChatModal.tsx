@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
-  Pressable,
+  TouchableOpacity,
   TextInput,
   StyleSheet,
   Modal,
@@ -118,9 +118,9 @@ export const ChatModal: React.FC<ChatModalProps> = ({
             { backgroundColor: theme.surface, borderBottomColor: theme.border },
           ]}
         >
-          <Pressable onPress={onClose} style={styles.backButton}>
+          <TouchableOpacity onPress={onClose} style={styles.backButton}>
             <Icon name="close" size={24} color={theme.text} />
-          </Pressable>
+          </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={[styles.avatar, { backgroundColor: '#2563EB' }]}>
               <Icon name="chat" size={22} color="#fff" />
@@ -161,9 +161,9 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 )}
                 <Text style={[styles.messageText, { color: theme.text }]}>{msg.message}</Text>
                 {msg.image && (
-                  <Pressable onPress={() => setPreviewImage(msg.image)} style={styles.messageImageWrap}>
+                  <TouchableOpacity onPress={() => setPreviewImage(msg.image)} style={styles.messageImageWrap}>
                     <Image source={{ uri: msg.image }} style={styles.messageImage} resizeMode="cover" />
-                  </Pressable>
+                  </TouchableOpacity>
                 )}
                 <Text
                   style={[
@@ -215,20 +215,20 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 {selectedImages.map((uri, idx) => (
                   <View key={`${uri}-${idx}`} style={styles.attachmentChip}>
                     <Image source={{ uri }} style={styles.attachmentImage} />
-                    <Pressable
+                    <TouchableOpacity
                       onPress={() => setSelectedImages((prev) => prev.filter((_, i) => i !== idx))}
                       style={styles.attachmentRemove}
                     >
                       <Icon name="close" size={14} color="#fff" />
-                    </Pressable>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </ScrollView>
             )}
             <View style={styles.inputRow}>
-              <Pressable onPress={() => setShowAttachOptions(true)} style={styles.attachButton}>
+              <TouchableOpacity onPress={() => setShowAttachOptions(true)} style={styles.attachButton}>
                 <Icon name="paperclip" size={18} color={theme.text} />
-              </Pressable>
+              </TouchableOpacity>
               <TextInput
                 style={[
                   styles.textInput,
@@ -245,7 +245,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 onSubmitEditing={handleSend}
                 returnKeyType="send"
               />
-              <Pressable
+              <TouchableOpacity
                 onPress={handleSend}
                 style={[
                   styles.sendButton,
@@ -254,7 +254,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 disabled={!canSend || isSending}
               >
                 <Icon name="send" size={20} color="#fff" />
-              </Pressable>
+              </TouchableOpacity>
             </View>
           </View>
         ) : (
@@ -278,18 +278,18 @@ export const ChatModal: React.FC<ChatModalProps> = ({
         animationType="fade"
         onRequestClose={() => setShowAttachOptions(false)}
       >
-        <Pressable style={styles.attachOverlay} onPress={() => setShowAttachOptions(false)}>
+        <TouchableOpacity style={styles.attachOverlay} onPress={() => setShowAttachOptions(false)}>
           <View style={[styles.attachSheet, { backgroundColor: theme.surface }]}>
-            <Pressable style={styles.attachOption} onPress={handleTakePhoto}>
+            <TouchableOpacity style={styles.attachOption} onPress={handleTakePhoto}>
               <Icon name="camera" size={18} color={theme.text} />
               <Text style={[styles.attachOptionText, { color: theme.text }]}>Take Photo</Text>
-            </Pressable>
-            <Pressable style={styles.attachOption} onPress={handlePickImage}>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.attachOption} onPress={handlePickImage}>
               <Icon name="document" size={18} color={theme.text} />
               <Text style={[styles.attachOptionText, { color: theme.text }]}>Upload Photo</Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
-        </Pressable>
+        </TouchableOpacity>
       </Modal>
 
       <CameraCaptureModal
@@ -305,13 +305,13 @@ export const ChatModal: React.FC<ChatModalProps> = ({
         animationType="fade"
         onRequestClose={() => setPreviewImage(null)}
       >
-        <Pressable style={styles.previewOverlay} onPress={() => setPreviewImage(null)}>
+        <TouchableOpacity style={styles.previewOverlay} onPress={() => setPreviewImage(null)}>
           <View style={styles.previewContainer}>
             {previewImage && (
               <Image source={{ uri: previewImage }} style={styles.previewImage} resizeMode="contain" />
             )}
           </View>
-        </Pressable>
+        </TouchableOpacity>
       </Modal>
     </Modal>
   );

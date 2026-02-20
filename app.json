@@ -22,7 +22,7 @@
       ],
       "expo-background-task"
     ],
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {

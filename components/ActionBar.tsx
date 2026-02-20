@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Icon } from './Icon';
 
 interface ActionBarProps {
@@ -10,15 +10,15 @@ interface ActionBarProps {
 export const ActionBar: React.FC<ActionBarProps> = ({ onOpenChat, onOpenHistory }) => {
   return (
     <View style={styles.container}>
-      <Pressable onPress={onOpenChat} style={styles.chatButton}>
+      <TouchableOpacity onPress={onOpenChat} style={styles.chatButton}>
         <Icon name="chat" size={18} color="#fff" />
         <Text style={styles.buttonText}>Open Chat</Text>
-      </Pressable>
+      </TouchableOpacity>
 
-      <Pressable onPress={onOpenHistory} style={styles.historyButton}>
+      <TouchableOpacity onPress={onOpenHistory} style={styles.historyButton}>
         <Icon name="history" size={18} color="#fff" />
         <Text style={styles.buttonText}>History</Text>
-      </Pressable>
+      </TouchableOpacity>
     </View>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, Modal, ScrollView, StatusBar, Platform, Image, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, Modal, ScrollView, StatusBar, Platform, Image, FlatList, ActivityIndicator } from 'react-native';
 import { HistoryFilter, HistoricalIncident, ChatMessage } from '@/types';
 import { formatDate, formatTime, getTheme } from '@/utils';
 import { fetchHistoricalIncidents, fetchChatMessages, STATUS_COLORS, STATUS_FLOW, HISTORY_PAGE_SIZE } from '@/mockData';
@@ -227,12 +227,12 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
           >
             <Text style={styles.statusText}>{incident.status}</Text>
           </View>
-          <Pressable
+          <TouchableOpacity
             onPress={() => openChatForIncident(String(incident.id))}
             style={[styles.chatButton, { borderColor: theme.border }]}
           >
             <Icon name="chat" size={14} color={theme.text} />
-          </Pressable>
+          </TouchableOpacity>
         </View>
       </View>
       <View style={styles.incidentRow}>
@@ -248,14 +248,14 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
         {incident.description}
       </Text>
 
-      <Pressable
+      <TouchableOpacity
         onPress={() => toggleExpanded(String(incident.id))}
         style={[styles.expandButton, { borderColor: theme.border }]}
       >
         <Text style={[styles.expandButtonText, { color: theme.text }]}>
           {expandedIds.includes(String(incident.id)) ? 'Hide details' : 'Show details'}
         </Text>
-      </Pressable>
+      </TouchableOpacity>
 
       {expandedIds.includes(String(incident.id)) && (
         <View style={[styles.expandedSection, { borderTopColor: theme.border }]}>
@@ -317,13 +317,13 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
       <View style={[styles.container, { backgroundColor: theme.background }]}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          <Pressable
+          <TouchableOpacity
             onPress={onClose}
             hitSlop={8}
             style={[styles.backButton, { backgroundColor: theme.surfaceAlt }]}
           >
             <Icon name="close" size={24} color={theme.text} />
-          </Pressable>
+          </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={[styles.avatar, { backgroundColor: '#3B82F6' }]}>
               <Icon name="history" size={22} color="#fff" />
@@ -361,7 +361,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
                 contentContainerStyle={styles.pickerContainer}
               >
                 {['all', ...incidentTypes].map((type) => (
-                  <Pressable
+                  <TouchableOpacity
                     key={type}
                     onPress={() => setFilter({ ...filter, type })}
                     style={[
@@ -379,7 +379,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
                     >
                       {type === 'all' ? 'All' : type}
                     </Text>
-                  </Pressable>
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             </View>
@@ -394,7 +394,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
                 contentContainerStyle={styles.pickerContainer}
               >
                 {['all', ...STATUS_FLOW].map((status) => (
-                  <Pressable
+                  <TouchableOpacity
                     key={status}
                     onPress={() => setFilter({ ...filter, status })}
                     style={[
@@ -412,7 +412,7 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ visible, onClose, is
                     >
                       {status === 'all' ? 'All' : status}
                     </Text>
-                  </Pressable>
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             </View>

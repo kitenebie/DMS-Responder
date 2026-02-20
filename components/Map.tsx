@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, StyleProp, ViewStyle } from 'react-native';
 import { Incident as IncidentType } from '@/types';
 import MapScreen from './MapScreen';
 
@@ -12,6 +12,8 @@ interface MapProps {
   onMapPress?: () => void;
   onMapRelease?: () => void;
   showFullscreenToggle?: boolean;
+  mapHeight?: number;
+  containerStyle?: StyleProp<ViewStyle>;
 }
 
 export const Map: React.FC<MapProps> = ({
@@ -22,17 +24,20 @@ export const Map: React.FC<MapProps> = ({
   onMapPress,
   onMapRelease,
   showFullscreenToggle,
+  mapHeight,
+  containerStyle,
 }) => {
 
-  const mapHeight = isFullscreen ? Dimensions.get('window').height : 560;
+  const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 560);
 
   return (
     <View
       style={[
         styles.mapContainer,
+        containerStyle,
         {
           backgroundColor: isDarkMode ? '#1a1a2e' : '#E0E7FF',
-          height: mapHeight,
+          height: resolvedMapHeight,
           borderRadius: isFullscreen ? 0 : 12,
         },
       ]}

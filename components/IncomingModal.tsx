@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Modal, Image, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, ActivityIndicator } from 'react-native';
 import { Incident } from '@/types';
 import { formatTime } from '@/utils';
 import { Icon } from './Icon';
@@ -204,13 +204,13 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
           <View style={styles.actions}>
             {showDeclineOptions ? (
               <>
-                <Pressable
+                <TouchableOpacity
                   onPress={() => setShowDeclineOptions(false)}
                   style={styles.cancelButton}
                   disabled={isLoading}>
                   <Text style={styles.cancelButtonText}>Back</Text>
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   onPress={handleDecline}
                   style={[styles.declineButton, isLoading && styles.buttonDisabled]}
                   disabled={isLoading}>
@@ -222,24 +222,24 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                       <Text style={styles.declineButtonText}>Confirm Decline</Text>
                     </>
                   )}
-                </Pressable>
+                </TouchableOpacity>
               </>
             ) : (
               <>
-                <Pressable
+                <TouchableOpacity
                   onPress={handleDismiss}
                   style={styles.dismissButton}
                   disabled={isLoading}>
                   <Text style={styles.dismissButtonText}>Dismiss</Text>
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   onPress={() => setShowDeclineOptions(true)}
                   style={[styles.declineOptionButton, isLoading && styles.buttonDisabled]}
                   disabled={isLoading}>
                   <Icon name="close" size={18} color="#fff" />
                   <Text style={styles.declineOptionButtonText}>Decline</Text>
-                </Pressable>
-                <Pressable
+                </TouchableOpacity>
+                <TouchableOpacity
                   onPress={handleAccept}
                   style={[styles.acceptButton, isLoading && styles.buttonDisabled]}
                   disabled={isLoading}>
@@ -251,7 +251,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                       <Text style={styles.acceptButtonText}>Accept</Text>
                     </>
                   )}
-                </Pressable>
+                </TouchableOpacity>
               </>
             )}
           </View>

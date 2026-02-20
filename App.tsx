@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  Pressable,
+  TouchableOpacity,
   StatusBar,
   ScrollView,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
   Modal,
   Alert,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
@@ -23,7 +24,7 @@ import { ReportForm } from './components/ReportForm';
 import { ActionBar } from './components/ActionBar';
 import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
-import { getCredentials, login } from './components/lib/auth';
+import { getCredentials, login, logout } from './components/lib/auth';
 import { sendLocation, stopLocationUpdates, submitReportForm } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import {
@@ -39,6 +40,7 @@ import Background from 'Background';
 
 const AppContent = () => {
   const insets = useSafeAreaInsets();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const scrollViewRef = useRef<ScrollView>(null);
   const statusTrackerYRef = useRef(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -318,15 +320,54 @@ const AppContent = () => {
     setShowLogoutModal(true);
   }, []);
 
-  const confirmLogout = useCallback(() => {
+  const confirmLogout = useCallback(async () => {
     setShowLogoutModal(false);
+    await logout();
+    stopLocationUpdates();
+    resetIncidentState();
+    setState((prev) => ({
+      ...prev,
+      showHistory: false,
+      isMapFullscreen: false,
+      historySearch: '',
+      historyFilter: { type: 'all', status: 'all' },
+      newMessage: '',
+    }));
     setIsLoggedIn(false);
     setUserName(DEFAULT_CONFIG.responder_name);
-  }, []);
+  }, [resetIncidentState]);
 
   const cancelLogout = useCallback(() => {
     setShowLogoutModal(false);
   }, []);
+
+  const renderLogoutModal = () => (
+    <Modal
+      transparent
+      visible={showLogoutModal}
+      animationType="fade"
+      onRequestClose={cancelLogout}>
+      <TouchableOpacity style={styles.modalOverlay} onPress={cancelLogout}>
+        <TouchableOpacity style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+          <Text style={[styles.modalTitle, { color: theme.text }]}>Logout</Text>
+          <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>
+            Are you sure you want to logout?
+          </Text>
+          <View style={styles.modalButtons}>
+            <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={cancelLogout}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalButton, styles.confirmButton]}
+              onPress={confirmLogout}>
+              <Text style={styles.confirmButtonText}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+        
+      </TouchableOpacity>
+    </Modal>
+  );
 
   const handleSendMessage = useCallback(
     async (message: string, images: string[]) => {
@@ -435,6 +476,8 @@ const AppContent = () => {
   };
   const isStatusCompleted = state.currentStatus === 'Completed';
   const mapShouldBeFullscreen = state.isMapFullscreen || isStatusCompleted;
+  const isLandscape = screenWidth > screenHeight;
+  const landscapeMapHeight = Math.max(screenHeight - insets.top - 128, 280);
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -491,9 +534,9 @@ const AppContent = () => {
         overlay && styles.headerOverlay,
       ]}>
       <View style={styles.headerLeft}>
-        <Pressable onPress={handleLogout} style={styles.logoutButton}>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
           <Icon name="logout" size={20} color={theme.text} />
-        </Pressable>
+        </TouchableOpacity>
         <View style={[styles.headerIcon, { backgroundColor: DEFAULT_CONFIG.primary_color }]}>
           <Image source={require('./assets/icon.png')} style={styles.headerLogo} />
         </View>
@@ -505,15 +548,108 @@ const AppContent = () => {
         </View>
       </View>
       <View style={styles.headerRight}>
-        <Pressable
+        <TouchableOpacity
           onPress={handleToggleTheme}
           style={[styles.themeButton, { backgroundColor: theme.surfaceAlt }]}>
           <Icon name={isDarkMode ? 'moon' : 'sun'} size={22} color={theme.text} />
-        </Pressable>
+        </TouchableOpacity>
         {renderStatusBadge()}
       </View>
     </View>
   );
+
+  if (isLandscape) {
+    return (
+      <ThemeProvider>
+        <Background />
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+          <StatusBar />
+          {renderHeader()}
+
+          <View style={styles.landscapeContent}>
+            <View style={styles.landscapeMapPane}>
+              <Map
+                isDarkMode={isDarkMode}
+                isFullscreen={false}
+                incident={state.activeIncident}
+                onToggleFullscreen={handleToggleMapFullscreen}
+                onRestoreSize={handleRestoreMapSize}
+                onMapPress={() => setIsMapInteracting(true)}
+                onMapRelease={() => setIsMapInteracting(false)}
+                showFullscreenToggle={false}
+                mapHeight={landscapeMapHeight}
+              />
+            </View>
+
+            <View
+              style={[
+                styles.landscapeSidePane,
+                { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
+              ]}>
+              {state.activeIncident ? (
+                <ScrollView
+                  style={styles.landscapePanelScroll}
+                  contentContainerStyle={styles.landscapePanelScrollContent}
+                  showsVerticalScrollIndicator={false}>
+                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Statuses</Text>
+                  <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
+                    {state.activeIncident.type}
+                  </Text>
+                  <StatusTracker
+                    incidentId={state.activeIncident.id}
+                    onUpdateStatus={handleUpdateStatus}
+                    isDarkMode={isDarkMode}
+                  />
+                  <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
+                </ScrollView>
+              ) : (
+                <View style={styles.landscapeHistoryPanel}>
+                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>History</Text>
+                  <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
+                    No active report. Open incident history.
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.landscapeHistoryButton,
+                      { backgroundColor: DEFAULT_CONFIG.primary_color },
+                    ]}
+                    onPress={handleOpenHistory}>
+                    <Icon name="history" size={20} color="#fff" />
+                    <Text style={styles.landscapeHistoryButtonText}>Open History</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {incomingIncident !== null && (
+            <IncomingModal
+              visible={state.showIncomingModal}
+              incident={incomingIncident}
+              onAccept={handleAcceptIncident}
+              onDismiss={handleDismissIncident}
+            />
+          )}
+
+          <ChatModal
+            visible={state.showChat}
+            messages={state.chatMessages}
+            onClose={handleToggleChat}
+            onSendMessage={handleSendMessage}
+            isDarkMode={isDarkMode}
+          />
+
+          <HistoryModal
+            visible={state.showHistory}
+            onClose={handleCloseHistory}
+            isDarkMode={isDarkMode}
+          />
+
+          {renderLogoutModal()}
+        </SafeAreaView>
+      </ThemeProvider>
+    );
+  }
 
   if (state.isMapFullscreen) {
     return (
@@ -529,6 +665,7 @@ const AppContent = () => {
             onRestoreSize={handleRestoreMapSize}
             showFullscreenToggle={!isStatusCompleted}
           />
+          {renderLogoutModal()}
         </View>
       </ThemeProvider>
     );
@@ -551,11 +688,11 @@ const AppContent = () => {
             showFullscreenToggle={false}
           />
 
-          <Pressable
+          <TouchableOpacity
             style={[styles.floatingHistoryButton, { backgroundColor: theme.surface }]}
             onPress={handleOpenHistory}>
             <Icon name="history" size={26} color={theme.text} />
-          </Pressable>
+          </TouchableOpacity>
 
           {incomingIncident !== null && (
             <IncomingModal
@@ -571,6 +708,7 @@ const AppContent = () => {
             onClose={handleCloseHistory}
             isDarkMode={isDarkMode}
           />
+          {renderLogoutModal()}
         </View>
       </ThemeProvider>
     );
@@ -634,12 +772,12 @@ const AppContent = () => {
             </>
           ) : (
             <View style={styles.noIncidentContainer}>
-              <Pressable
+              <TouchableOpacity
                 style={[styles.historyButton, { backgroundColor: theme.surface }]}
                 onPress={handleOpenHistory}>
                 <Icon name="history" size={20} color={theme.text} />
                 <Text style={[styles.historyButtonText, { color: theme.text }]}>History</Text>
-              </Pressable>
+              </TouchableOpacity>
             </View>
           )}
         </ScrollView>
@@ -668,31 +806,7 @@ const AppContent = () => {
           isDarkMode={isDarkMode}
         />
 
-        {/* Logout Confirmation Modal */}
-        <Modal
-          transparent
-          visible={showLogoutModal}
-          animationType="fade"
-          onRequestClose={cancelLogout}>
-          <Pressable style={styles.modalOverlay} onPress={cancelLogout}>
-            <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-              <Text style={[styles.modalTitle, { color: theme.text }]}>Logout</Text>
-              <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>
-                Are you sure you want to logout?
-              </Text>
-              <View style={styles.modalButtons}>
-                <Pressable style={[styles.modalButton, styles.cancelButton]} onPress={cancelLogout}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.modalButton, styles.confirmButton]}
-                  onPress={confirmLogout}>
-                  <Text style={styles.confirmButtonText}>Logout</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
+        {renderLogoutModal()}
       </SafeAreaView>
     </ThemeProvider>
   );
@@ -788,6 +902,56 @@ const styles = StyleSheet.create({
   mainContentContainer: {
     padding: 16,
     gap: 16,
+  },
+  landscapeContent: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+  },
+  landscapeMapPane: {
+    width: '65%',
+  },
+  landscapeSidePane: {
+    width: '25%',
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  landscapePanelScroll: {
+    flex: 1,
+  },
+  landscapePanelScrollContent: {
+    padding: 12,
+    gap: 12,
+  },
+  landscapePanelTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  landscapePanelSubtitle: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  landscapeHistoryPanel: {
+    flex: 1,
+    padding: 14,
+    justifyContent: 'center',
+    gap: 12,
+  },
+  landscapeHistoryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  landscapeHistoryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,

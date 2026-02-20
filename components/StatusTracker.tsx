@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Modal, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { IncidentStatus, ReportStatus, ReportForm } from '@/types';
 import {
   STATUS_FLOW,
@@ -325,7 +325,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
               {isLeft ? (
                 <>
                   {/* Left side content */}
-                  <Pressable
+                  <TouchableOpacity
                     disabled={isActive || updating || timestamp != null}
                     onPress={() => handleUpdateStatus(status as IncidentStatus)}
                     style={[
@@ -356,10 +356,10 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                         {formatTime(timestamp)}
                       </Text>
                     )}
-                  </Pressable>
+                  </TouchableOpacity>
 
                   {/* Timeline node */}
-                  <Pressable
+                  <TouchableOpacity
                     disabled={isActive || updating || timestamp != null}
                     onPress={() => handleUpdateStatus(status as IncidentStatus)}
                     style={[
@@ -376,7 +376,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                     ) : (
                       <Icon name="lock" size={14} color="#fff" />
                     )}
-                  </Pressable>
+                  </TouchableOpacity>
 
                   {/* Right side spacer */}
                   <View style={styles.spacer} />
@@ -387,7 +387,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                   <View style={styles.spacer} />
 
                   {/* Timeline node */}
-                  <Pressable
+                  <TouchableOpacity
                     disabled={isActive || updating || timestamp != null}
                     onPress={() => handleUpdateStatus(status as IncidentStatus)}
                     style={[
@@ -404,10 +404,10 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                     ) : (
                       <Icon name="lock" size={14} color="#fff" />
                     )}
-                  </Pressable>
+                  </TouchableOpacity>
 
                   {/* Right side content */}
-                  <Pressable
+                  <TouchableOpacity
                     disabled={isActive || updating || timestamp != null}
                     onPress={() => handleUpdateStatus(status as IncidentStatus)}
                     style={[
@@ -438,7 +438,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                         {formatTime(timestamp)}
                       </Text>
                     )}
-                  </Pressable>
+                  </TouchableOpacity>
                 </>
               )}
             </View>
@@ -452,8 +452,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
         visible={confirmModalVisible}
         animationType="fade"
         onRequestClose={cancelStatusUpdate}>
-          <Pressable style={styles.modalOverlay} onPress={cancelStatusUpdate}>
-          <Pressable
+          <TouchableOpacity style={styles.modalOverlay} onPress={cancelStatusUpdate}>
+          <TouchableOpacity
             style={[
               styles.modalContent,
               { backgroundColor: theme.surface, borderColor: theme.border },
@@ -464,19 +464,19 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
               Do you want to update the status to {pendingStatus}?
             </Text>
             <View style={styles.modalButtons}>
-              <Pressable
+              <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton, { backgroundColor: theme.surfaceAlt }]}
                 onPress={cancelStatusUpdate}>
                 <Text style={[styles.cancelButtonText, { color: theme.text }]}>Cancel</Text>
-              </Pressable>
-              <Pressable
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={[styles.modalButton, styles.confirmButton]}
                 onPress={confirmStatusUpdate}>
                 <Text style={styles.confirmButtonText}>Confirm</Text>
-              </Pressable>
+              </TouchableOpacity>
             </View>
-          </Pressable>
-        </Pressable>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* Report Form Modal */}
@@ -489,8 +489,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}>
-          <Pressable style={styles.modalOverlayInner} onPress={cancelReportForm}>
-            <Pressable
+          <TouchableOpacity style={styles.modalOverlayInner} onPress={cancelReportForm}>
+            <TouchableOpacity
               style={[
                 styles.reportFormModalContent,
                 { backgroundColor: theme.surface, borderColor: theme.border },
@@ -508,14 +508,14 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
                   incidentId={incidentId}
                 />
                 <View style={[styles.modalButtonContainer]}>
-                <Pressable
+                <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton, { marginTop: 16 }]}
                   onPress={cancelReportForm}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
-                </Pressable>
+                </TouchableOpacity>
                 </View>
-            </Pressable>
-          </Pressable>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </KeyboardAvoidingView>
       </Modal>
     </View>

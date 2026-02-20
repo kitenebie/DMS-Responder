@@ -1,5 +1,5 @@
 import React, { memo, useEffect, useState, useCallback, useMemo } from 'react';
-import { StyleSheet, View, Text, Pressable } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { Incident } from '../src/types';
 import {
   MapView,
@@ -387,7 +387,7 @@ const MapScreen = memo(function MapScreen({
       )}
 
       {/* Follow User Toggle */}
-      <Pressable
+      <TouchableOpacity
         style={[
           styles.followButton,
           isDarkMode && styles.followButtonDark,
@@ -395,11 +395,11 @@ const MapScreen = memo(function MapScreen({
         ]}
         onPress={handleToggleFollow}>
         <Icon name="my-location" size={20} color="#fff" />
-      </Pressable>
+      </TouchableOpacity>
 
       {/* Fullscreen Toggle Button */}
       {onToggleFullscreen && showFullscreenToggle && (
-        <Pressable
+        <TouchableOpacity
           style={[styles.fullscreenButton, isDarkMode && styles.fullscreenButtonDark]}
           onPress={onToggleFullscreen}>
           <Icon
@@ -407,7 +407,7 @@ const MapScreen = memo(function MapScreen({
             size={20}
             color={isDarkMode ? '#fff' : '#333'}
           />
-        </Pressable>
+        </TouchableOpacity>
       )}
     </>
   );

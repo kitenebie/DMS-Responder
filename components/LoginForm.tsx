@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   View,
   Text,
-  Pressable,
+  TouchableOpacity,
   TextInput,
   StyleSheet,
   KeyboardAvoidingView,
@@ -106,32 +106,32 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
                 />
-                <Pressable onPress={() => setShowPassword(!showPassword)}>
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                   <Icon 
                     name={showPassword ? 'eye-off' : 'eye'} 
                     size={20} 
                     color={theme.textSecondary} 
                   />
-                </Pressable>
+                </TouchableOpacity>
               </View>
             </View>
 
             {/* Forgot Password Link */}
-            <Pressable style={styles.forgotPassword}>
+            <TouchableOpacity style={styles.forgotPassword}>
               <Text style={[styles.forgotPasswordText, { color: theme.primary }]}>
                 Forgot Password?
               </Text>
-            </Pressable>
+            </TouchableOpacity>
 
             {/* Login Button */}
-            <Pressable
+            <TouchableOpacity
               style={[styles.button, { backgroundColor: theme.primary }]}
               onPress={handleLogin}
               disabled={isLoading}>
               <Text style={styles.buttonText}>
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
 
           {/* Footer */}
