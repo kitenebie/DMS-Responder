@@ -11,6 +11,8 @@ import {
   Alert,
   Image,
   useWindowDimensions,
+  Platform,
+  AppState as RNAppState,
 } from 'react-native';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
@@ -34,9 +36,22 @@ import {
   DEFAULT_CONFIG,
   STATUS_COLORS,
 } from './src/mockData';
-import { AppState, ReportForm as ReportFormType, IncidentStatus, Incident } from './src/types';
+import {
+  AppState as ResponderAppState,
+  ReportForm as ReportFormType,
+  IncidentStatus,
+  Incident,
+} from './src/types';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Background from 'Background';
+import * as Location from 'expo-location';
+import {
+  consumePendingOverlayNavigation,
+  openOverlayPermissionSettings,
+  setOverlayBubbleVisible,
+  startOverlayLocationService,
+  stopOverlayLocationService,
+} from './components/services/OverlayLocationService';
 
 const AppContent = () => {
   const insets = useSafeAreaInsets();
@@ -48,7 +63,7 @@ const AppContent = () => {
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(true);
   const [userName, setUserName] = useState(DEFAULT_CONFIG.responder_name);
 
-  const [state, setState] = useState<AppState>({
+  const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
     activeIncident: null,
     currentStatus: 'Active',
@@ -72,6 +87,7 @@ const AppContent = () => {
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const overlayPermissionPromptShownRef = useRef(false);
 
   const resolveUserName = useCallback((userData: any) => {
     return (
@@ -100,6 +116,134 @@ const AppContent = () => {
       },
     }));
   }, []);
+
+  const buildOverlayIncident = useCallback((reportId: number): Incident => {
+    return {
+      id: String(reportId),
+      type: `Report #${reportId}`,
+      location: 'Unknown',
+      coordinates: null,
+      timeReported: new Date().toISOString(),
+      description: '',
+      priority: 'Medium',
+      caller: 'Unknown',
+      callerPhone: '',
+      icon: 'warning',
+      report_attachment: '',
+      isAccepted: true,
+      receiver_id: null,
+      dispatcher_id: null,
+    };
+  }, []);
+
+  const openReportChatFromOverlay = useCallback(
+    async (reportId: number) => {
+      if (!Number.isFinite(reportId) || reportId <= 0) {
+        return;
+      }
+
+      const activeMatch = String(state.activeIncident?.id ?? '').match(/\d+/);
+      const activeReportId = activeMatch ? Number(activeMatch[0]) : 0;
+      let incidentForChat: Incident | null =
+        activeReportId === reportId ? state.activeIncident : null;
+
+      if (!incidentForChat) {
+        try {
+          const latestIncident = await fetchIncomingIncident();
+          const latestMatch = String(latestIncident?.id ?? '').match(/\d+/);
+          const latestReportId = latestMatch ? Number(latestMatch[0]) : 0;
+          if (latestReportId === reportId) {
+            incidentForChat = latestIncident;
+          }
+        } catch (error) {
+          console.warn('Unable to resolve latest incident for overlay chat:', error);
+        }
+      }
+
+      const resolvedIncident = incidentForChat ?? buildOverlayIncident(reportId);
+      const messages = await fetchChatMessages(String(reportId));
+
+      setIncomingIncident(resolvedIncident);
+      setState((prev) => ({
+        ...prev,
+        showIncomingModal: false,
+        activeIncident: resolvedIncident,
+        showChat: true,
+        chatMessages: messages,
+      }));
+    },
+    [buildOverlayIncident, state.activeIncident]
+  );
+
+  const consumeOverlayNavigationIfAny = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    const pending = await consumePendingOverlayNavigation();
+    if (!pending?.reportId) {
+      return;
+    }
+
+    if (pending.screen === 'ReportChats') {
+      await openReportChatFromOverlay(pending.reportId);
+    }
+  }, [openReportChatFromOverlay]);
+
+  const syncOverlayStateForAppState = useCallback(
+    async (nextState: string) => {
+      if (Platform.OS !== 'android') {
+        return;
+      }
+
+      if (!isLoggedIn) {
+        await stopOverlayLocationService();
+        return;
+      }
+
+      const existingPermission = await Location.getForegroundPermissionsAsync();
+      let locationStatus = existingPermission.status;
+      if (locationStatus !== 'granted' && existingPermission.canAskAgain) {
+        const request = await Location.requestForegroundPermissionsAsync();
+        locationStatus = request.status;
+      }
+
+      if (locationStatus !== 'granted') {
+        return;
+      }
+
+      const overlayStatus = await startOverlayLocationService();
+      if (overlayStatus === 'permission_missing') {
+        if (nextState === 'active' && !overlayPermissionPromptShownRef.current) {
+          overlayPermissionPromptShownRef.current = true;
+          Alert.alert(
+            'Enable Floating Location Bubble',
+            'Allow "Display over other apps" so the floating location button can work like Messenger chat heads.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Open settings',
+                onPress: () => {
+                  void openOverlayPermissionSettings();
+                },
+              },
+            ]
+          );
+        }
+        return;
+      }
+
+      if (overlayStatus === 'started') {
+        overlayPermissionPromptShownRef.current = false;
+        const shouldShowBubble = nextState !== 'active';
+        await setOverlayBubbleVisible(shouldShowBubble);
+        if (!shouldShowBubble) {
+          await consumeOverlayNavigationIfAny();
+        }
+      }
+    },
+    [consumeOverlayNavigationIfAny, isLoggedIn]
+  );
 
   useEffect(() => {
     const reportIdRaw = state.activeIncident?.id;
@@ -146,6 +290,22 @@ const AppContent = () => {
       stopLocationUpdates();
     };
   }, [isLoggedIn, state.currentStatus, state.activeIncident?.id]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    void syncOverlayStateForAppState(RNAppState.currentState);
+
+    const appStateSubscription = RNAppState.addEventListener('change', (nextState) => {
+      void syncOverlayStateForAppState(nextState);
+    });
+
+    return () => {
+      appStateSubscription.remove();
+    };
+  }, [syncOverlayStateForAppState]);
 
   // Auto-login on app start
   useEffect(() => {
@@ -324,6 +484,7 @@ const AppContent = () => {
     setShowLogoutModal(false);
     await logout();
     stopLocationUpdates();
+    await stopOverlayLocationService();
     resetIncidentState();
     setState((prev) => ({
       ...prev,

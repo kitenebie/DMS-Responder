@@ -53,7 +53,12 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.INTERNET",
+        "android.permission.WAKE_LOCK"
       ],
       "package": "com.juvybantal.responder"
     },
