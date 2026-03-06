@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './axios';
+import FirebaseNotificationService from '../../services/FirebaseNotificationService';
 
 export const getStoredUser = async () => {
   try {
@@ -40,7 +41,21 @@ export const getDeviceId = async () => {
 export const login = async (email: string, password: string, rememberMe: boolean = false) => {
   try {
     const deviceId = await getDeviceId();
-    const response = await api.post('/auth/login', { email, password, remember_me: rememberMe, device_id: deviceId });
+    let fcmToken: string | null = null;
+
+    try {
+      fcmToken = await FirebaseNotificationService.getToken();
+    } catch (error) {
+      console.log('Failed to get FCM token before login:', error);
+    }
+
+    const response = await api.post('/auth/login', {
+      email,
+      password,
+      remember_me: rememberMe,
+      device_id: deviceId,
+      ...(fcmToken ? { fcm_token: fcmToken } : {}),
+    });
 
     const userData = response.data;
 
@@ -58,6 +73,19 @@ export const login = async (email: string, password: string, rememberMe: boolean
     if (userData.refresh_token) {
       await AsyncStorage.setItem('refresh_token', userData.refresh_token);
       console.log('Refresh token stored successfully');
+    }
+
+    if (fcmToken) {
+      try {
+        await FirebaseNotificationService.syncToken(userData.user?.email ?? email, fcmToken);
+        userData.user = {
+          ...userData.user,
+          FCM: fcmToken,
+        };
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+      } catch (error) {
+        console.log('Failed to sync FCM token after login:', error);
+      }
     }
 
     console.log('Login successful');
@@ -141,14 +169,22 @@ export const refreshLogin = async () => {
   try {
     const refreshToken = await AsyncStorage.getItem('refresh_token');
     const deviceId = await getDeviceId();
+    const fcmToken = await FirebaseNotificationService.getToken();
     if (!refreshToken) {
       throw new Error('No refresh token');
     }
-    const response = await api.post('/auth/refresh', { refresh_token: refreshToken, device_id: deviceId });
+    const response = await api.post('/auth/refresh', {
+      refresh_token: refreshToken,
+      device_id: deviceId,
+      ...(fcmToken ? { fcm_token: fcmToken } : {}),
+    });
     const userData = response.data;
     await AsyncStorage.setItem('user', JSON.stringify(userData));
     if (userData.refresh_token) {
       await AsyncStorage.setItem('refresh_token', userData.refresh_token);
+    }
+    if (fcmToken) {
+      await FirebaseNotificationService.syncToken(userData.user?.email, fcmToken);
     }
     console.log('Refresh login successful');
     return userData;

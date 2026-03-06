@@ -52,6 +52,8 @@ import {
   startOverlayLocationService,
   stopOverlayLocationService,
 } from './components/services/OverlayLocationService';
+import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import FirebaseNotificationService from './services/FirebaseNotificationService';
 
 const AppContent = () => {
   const insets = useSafeAreaInsets();
@@ -88,6 +90,9 @@ const AppContent = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const overlayPermissionPromptShownRef = useRef(false);
+  const stateRef = useRef(state);
+  const refreshIncomingIncidentRef = useRef<() => Promise<void>>(async () => {});
+  const openReportChatFromOverlayRef = useRef<(reportId: number) => Promise<void>>(async () => {});
 
   const resolveUserName = useCallback((userData: any) => {
     return (
@@ -245,11 +250,112 @@ const AppContent = () => {
     [consumeOverlayNavigationIfAny, isLoggedIn]
   );
 
+  const refreshIncomingIncident = useCallback(async () => {
+    const incident = await fetchIncomingIncident();
+    const incidentIdNum = Number(incident?.id ?? 0);
+    const hasValidIncident = Number.isFinite(incidentIdNum) && incidentIdNum > 0;
+
+    if (!hasValidIncident) {
+      resetIncidentState();
+      return;
+    }
+
+    if (incident.id !== '0' && incident.id !== 'unknown' && incident.isAccepted === true && incident.isAccepted !== null) {
+      setIncomingIncident(incident);
+      setState((prev) => ({
+        ...prev,
+        showIncomingModal: false,
+        activeIncident: incident,
+        currentStatus: 'Active',
+      }));
+      return;
+    }
+
+    setIncomingIncident(incident);
+    console.log(`is VALID: ${incident.id}`);
+
+    if (incident.id !== '0' && incident.id !== 'unknown' && incident.isAccepted === false) {
+      setState((prev) => ({
+        ...prev,
+        showIncomingModal: true,
+      }));
+    }
+  }, [resetIncidentState]);
+
+  const handleForegroundNotification = useCallback(
+    async (remoteMessage: FirebaseMessagingTypes.RemoteMessage) => {
+      const notificationType = remoteMessage.data?.notification_type ?? '';
+      const reportIdRaw =
+        remoteMessage.data?.report_id ??
+        remoteMessage.data?.incident_id ??
+        remoteMessage.data?.reportId;
+      const reportId = Number(reportIdRaw);
+      const currentState = stateRef.current;
+
+      if (notificationType === 'new_message' && Number.isFinite(reportId) && reportId > 0) {
+        const activeReportId = Number(currentState.activeIncident?.id ?? 0);
+        if (currentState.showChat || activeReportId === reportId) {
+          try {
+            const messages = await fetchChatMessages(String(reportId));
+            setState((prev) => {
+              const currentActiveReportId = Number(prev.activeIncident?.id ?? 0);
+              if (currentActiveReportId !== reportId) {
+                return prev;
+              }
+
+              return {
+                ...prev,
+                chatMessages: messages,
+              };
+            });
+          } catch (error) {
+            console.warn('Failed to refresh chat after foreground notification:', error);
+          }
+        }
+      }
+
+      await refreshIncomingIncidentRef.current();
+    },
+    []
+  );
+
+  const handleNotificationOpen = useCallback(
+    async (remoteMessage: FirebaseMessagingTypes.RemoteMessage) => {
+      const notificationType = remoteMessage.data?.notification_type ?? '';
+      const reportIdRaw =
+        remoteMessage.data?.report_id ??
+        remoteMessage.data?.incident_id ??
+        remoteMessage.data?.reportId;
+      const reportId = Number(reportIdRaw);
+
+      if (notificationType === 'new_message' && Number.isFinite(reportId) && reportId > 0) {
+        await openReportChatFromOverlayRef.current(reportId);
+        return;
+      }
+
+      await refreshIncomingIncidentRef.current();
+    },
+    []
+  );
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    refreshIncomingIncidentRef.current = refreshIncomingIncident;
+  }, [refreshIncomingIncident]);
+
+  useEffect(() => {
+    openReportChatFromOverlayRef.current = openReportChatFromOverlay;
+  }, [openReportChatFromOverlay]);
+
   useEffect(() => {
     const reportIdRaw = state.activeIncident?.id;
     const reportIdMatch = String(reportIdRaw ?? '').match(/\d+/);
     const reportIdValue = reportIdMatch ? Number(reportIdMatch[0]) : undefined;
-    const hasValidReportId = Number.isFinite(reportIdValue) && reportIdValue > 0;
+    const hasValidReportId =
+      typeof reportIdValue === 'number' && Number.isFinite(reportIdValue) && reportIdValue > 0;
     const shouldSendLocation = isLoggedIn;
 
     if (!shouldSendLocation) {
@@ -270,7 +376,7 @@ const AppContent = () => {
         await sendLocation(
           { lat: location.latitude, lng: location.longitude },
           { repeat: false },
-          hasValidReportId ? reportIdValue : undefined
+          hasValidReportId ? Number(reportIdValue) : undefined
         );
       } catch (error) {
         console.log('[Location] Failed to send location:', error);
@@ -307,6 +413,25 @@ const AppContent = () => {
     };
   }, [syncOverlayStateForAppState]);
 
+  useEffect(() => {
+    void FirebaseNotificationService.initialize({
+      onForegroundMessage: (remoteMessage) => handleForegroundNotification(remoteMessage),
+      onNotificationOpened: (remoteMessage) => handleNotificationOpen(remoteMessage),
+    });
+
+    return () => {
+      FirebaseNotificationService.cleanup();
+    };
+  }, [handleForegroundNotification, handleNotificationOpen]);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return;
+    }
+
+    void FirebaseNotificationService.syncCurrentToken();
+  }, [isLoggedIn]);
+
   // Auto-login on app start
   useEffect(() => {
     const attemptAutoLogin = async () => {
@@ -331,47 +456,17 @@ const AppContent = () => {
 
   // Fetch incoming incident every 3 seconds
   useEffect(() => {
-    const loadIncident = async () => {
-      const incident = await fetchIncomingIncident();
-      const incidentIdNum = Number(incident?.id ?? 0);
-      const hasValidIncident = Number.isFinite(incidentIdNum) && incidentIdNum > 0;
-
-      if (!hasValidIncident) {
-        resetIncidentState();
-        return;
-      }
-      // Check if the incident is a valid real incident (not "Unknown" defaults)
-      // If incident is already accepted, automatically set it as active and show on map
-      if (incident.id !== "0"  && incident.id !== "unknown" && incident.isAccepted === true && incident.isAccepted !== null) {
-        setIncomingIncident(incident);
-        setState((prev) => ({
-          ...prev,
-          activeIncident: incident,
-          currentStatus: 'Active',
-        }));
-        return;
-      }
-
-      setIncomingIncident(incident);
-      console.log(`is VALID: ${incident.id}`);
-      // Show the modal when a valid incident is fetched and not yet accepted
-      if (incident.id !== "0"  &&  incident.id !== "unknown" && incident.isAccepted === false) {
-        setState((prev) => ({
-          ...prev,
-          showIncomingModal: true,
-        }));
-      }
-    };
-
     // Initial fetch
-    loadIncident();
+    void refreshIncomingIncident();
 
     // Set up polling every 3 seconds
-    const intervalId = setInterval(loadIncident, 3000);
+    const intervalId = setInterval(() => {
+      void refreshIncomingIncident();
+    }, 3000);
 
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
-  }, []);
+  }, [refreshIncomingIncident]);
 
   const handleAcceptIncident = useCallback(() => {
     if (!incomingIncident) return;
@@ -752,20 +847,23 @@ const AppContent = () => {
                   style={styles.landscapePanelScroll}
                   contentContainerStyle={styles.landscapePanelScrollContent}
                   showsVerticalScrollIndicator={false}>
-                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Statuses</Text>
+                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Menu</Text>
                   <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
                     {state.activeIncident.type}
+                  </Text>
+                  <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
+                  <Text style={[styles.landscapeSectionTitle, { color: theme.text }]}>
+                    Status Timeline
                   </Text>
                   <StatusTracker
                     incidentId={state.activeIncident.id}
                     onUpdateStatus={handleUpdateStatus}
                     isDarkMode={isDarkMode}
                   />
-                  <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
                 </ScrollView>
               ) : (
                 <View style={styles.landscapeHistoryPanel}>
-                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>History</Text>
+                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Menu</Text>
                   <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
                     No active report. Open incident history.
                   </Text>
@@ -1067,14 +1165,16 @@ const styles = StyleSheet.create({
   landscapeContent: {
     flex: 1,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 16,
     padding: 16,
   },
   landscapeMapPane: {
-    width: '65%',
+    flex: 1.8,
   },
   landscapeSidePane: {
-    width: '25%',
+    flex: 1,
+    minWidth: 280,
+    maxWidth: 380,
     borderRadius: 12,
     borderWidth: 1,
     overflow: 'hidden',
@@ -1093,6 +1193,11 @@ const styles = StyleSheet.create({
   landscapePanelSubtitle: {
     fontSize: 12,
     marginBottom: 8,
+  },
+  landscapeSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 4,
   },
   landscapeHistoryPanel: {
     flex: 1,

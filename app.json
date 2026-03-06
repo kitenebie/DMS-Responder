@@ -2,7 +2,7 @@
   "expo": {
     "name": "responder",
     "slug": "responder",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "web": {
       "favicon": "./assets/favicon.png"
     },
@@ -11,6 +11,14 @@
     },
     "plugins": [
       "expo-audio",
+      "expo-notifications",
+      "@react-native-firebase/app",
+      [
+        "@react-native-firebase/messaging",
+        {
+          "autolinking": true
+        }
+      ],
       "@maplibre/maplibre-react-native",
       [
         "expo-location",
@@ -22,7 +30,7 @@
       ],
       "expo-background-task"
     ],
-    "orientation": "default",
+    "orientation": "landscape",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
@@ -48,9 +56,11 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "googleServicesFile": "./android/app/google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
@@ -58,14 +68,10 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.INTERNET",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "com.google.android.c2dm.permission.RECEIVE"
       ],
-      "package": "com.juvybantal.responder"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "f84d9280-36b1-4f27-8440-20f66f088a94"
-      }
+      "package": "com.irosinmobile.responder"
     }
   }
 }

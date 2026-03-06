@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "907129181512",
+    "firebase_url": "https://notification-app-c4e8e-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "notification-app-c4e8e",
+    "storage_bucket": "notification-app-c4e8e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:907129181512:android:df079dbe8fc34af8afcf7d",
+        "android_client_info": {
+          "package_name": "com.juvybantal.Notification"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1DTUuXCwo3pUYu0r0EmrNC04eKIh2BpI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:907129181512:android:3e480d0a200bacd2afcf7d",
+        "android_client_info": {
+          "package_name": "com.irosinmobile.responder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1DTUuXCwo3pUYu0r0EmrNC04eKIh2BpI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
