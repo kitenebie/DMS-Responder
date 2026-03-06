@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -64,6 +64,7 @@ const AppContent = () => {
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(true);
   const [userName, setUserName] = useState(DEFAULT_CONFIG.responder_name);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
@@ -74,6 +75,7 @@ const AppContent = () => {
     showHistory: false,
     isDarkMode: isDarkMode,
     chatMessages: [],
+    activeChatTab: 'dispatcher',
     newMessage: '',
     historySearch: '',
     historyFilter: { type: 'all', status: 'all' },
@@ -113,6 +115,7 @@ const AppContent = () => {
       currentStatus: 'Active',
       showChat: false,
       chatMessages: [],
+      activeChatTab: 'dispatcher',
       reportForm: {
         actionsTaken: '',
         timeArrived: '',
@@ -138,6 +141,7 @@ const AppContent = () => {
       isAccepted: true,
       receiver_id: null,
       dispatcher_id: null,
+      citizen_id: null,
     };
   }, []);
 
@@ -174,6 +178,7 @@ const AppContent = () => {
         showIncomingModal: false,
         activeIncident: resolvedIncident,
         showChat: true,
+        activeChatTab: 'citizen',
         chatMessages: messages,
       }));
     },
@@ -441,6 +446,7 @@ const AppContent = () => {
           console.log('Auto-login with stored credentials');
           const userData = await login(credentials.email, credentials.password);
           setUserName(resolveUserName(userData));
+          setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
           setIsLoggedIn(true);
         }
       } catch (error) {
@@ -520,6 +526,7 @@ const AppContent = () => {
           setState((current) => ({
             ...current,
             chatMessages: messages,
+            activeChatTab: current.activeChatTab ?? 'citizen',
           }));
         });
       }
@@ -568,6 +575,7 @@ const AppContent = () => {
   const handleLogin = useCallback((userData: any) => {
     console.log('Login successful:', userData);
     setUserName(resolveUserName(userData));
+    setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
     setIsLoggedIn(true);
   }, [resolveUserName]);
 
@@ -591,6 +599,7 @@ const AppContent = () => {
     }));
     setIsLoggedIn(false);
     setUserName(DEFAULT_CONFIG.responder_name);
+    setCurrentUserId(null);
   }, [resetIncidentState]);
 
   const cancelLogout = useCallback(() => {
@@ -638,9 +647,9 @@ const AppContent = () => {
 
       const reportTitle = state.activeIncident?.type ?? 'Incident';
       const receiverId =
-        state.activeIncident?.receiver_id ??
-        state.activeIncident?.dispatcher_id ??
-        undefined;
+        state.activeChatTab === 'dispatcher'
+          ? state.activeIncident?.dispatcher_id ?? undefined
+          : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? undefined;
       const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const tempIds: number[] = [];
 
@@ -721,8 +730,37 @@ const AppContent = () => {
         Alert.alert('Error', 'Failed to send message. Please try again.');
       }
     },
-    [state.activeIncident]
+    [state.activeChatTab, state.activeIncident]
   );
+  const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
+    setState((prev) => ({
+      ...prev,
+      activeChatTab: tab,
+    }));
+  }, []);
+
+  const filteredChatMessages = useMemo(() => {
+    const activeTab = state.activeChatTab ?? 'citizen';
+    const selfId = currentUserId;
+    const dispatcherId = state.activeIncident?.dispatcher_id ?? null;
+    const citizenId = state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? null;
+
+    if (!selfId) {
+      return state.chatMessages;
+    }
+
+    return state.chatMessages.filter((msg) => {
+      const senderId = msg.sender_id ?? null;
+      const receiverId = msg.receiver_id ?? null;
+      const peerId = senderId === selfId ? receiverId : senderId;
+
+      if (activeTab === 'dispatcher') {
+        return dispatcherId ? peerId === dispatcherId : true;
+      }
+
+      return citizenId ? peerId === citizenId : true;
+    });
+  }, [currentUserId, state.activeChatTab, state.activeIncident?.citizen_id, state.activeIncident?.dispatcher_id, state.activeIncident?.receiver_id, state.chatMessages]);
   const theme = {
     background: isDarkMode ? '#0F172A' : '#F8FAFC',
     surface: isDarkMode ? '#1E293B' : '#FFFFFF',
@@ -892,10 +930,16 @@ const AppContent = () => {
 
           <ChatModal
             visible={state.showChat}
-            messages={state.chatMessages}
+            messages={filteredChatMessages}
             onClose={handleToggleChat}
             onSendMessage={handleSendMessage}
             isDarkMode={isDarkMode}
+            chatTabs={[
+              { key: 'dispatcher', label: 'Dispatcher' },
+              { key: 'citizen', label: 'Citizen' },
+            ]}
+            activeChatTab={state.activeChatTab ?? 'citizen'}
+            onChangeChatTab={handleChangeChatTab}
           />
 
           <HistoryModal
@@ -1053,10 +1097,16 @@ const AppContent = () => {
 
         <ChatModal
           visible={state.showChat}
-          messages={state.chatMessages}
+          messages={filteredChatMessages}
           onClose={handleToggleChat}
           onSendMessage={handleSendMessage}
           isDarkMode={isDarkMode}
+          chatTabs={[
+            { key: 'dispatcher', label: 'Dispatcher' },
+            { key: 'citizen', label: 'Citizen' },
+          ]}
+          activeChatTab={state.activeChatTab ?? 'citizen'}
+          onChangeChatTab={handleChangeChatTab}
         />
 
         <HistoryModal

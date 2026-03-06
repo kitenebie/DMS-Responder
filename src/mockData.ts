@@ -172,8 +172,9 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
 
         report_attachment: report?.image_path ? `${ip}/storage/${report.image_path}` : '',
         isAccepted: response.data.is_accepted || false,
-        receiver_id: report?.receiver_id ?? report?.dispatcher_id ?? report?.user_id ?? null,
-        dispatcher_id: report?.dispatcher_id ?? null,
+        receiver_id: report?.receiver_id ?? report?.user_id ?? report?.operator_id ?? null,
+        dispatcher_id: report?.operator_id ?? report?.dispatcher_id ?? null,
+        citizen_id: report?.user_id ?? null,
       };
     }
 
@@ -193,6 +194,7 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
       isAccepted: false,
       receiver_id: null,
       dispatcher_id: null,
+      citizen_id: null,
     };
   } catch (error) {
     console.log('Error fetching incident:', error);
@@ -212,6 +214,7 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
       isAccepted: false,
       receiver_id: null,
       dispatcher_id: null,
+      citizen_id: null,
     };
   }
 };
@@ -307,7 +310,7 @@ export const fetchChatMessages = async (reportId: string): Promise<ChatMessage[]
         id: Number(item.id ?? 0),
         sender: item.sender ?? 'Dispatch',
         message: item.message ?? '',
-        time: item.time ?? '',
+        time: item.time ?? (item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''),
         isUser: Boolean(item.isUser),
         image,
         timestamp: item.timestamp ?? null,
@@ -350,8 +353,7 @@ export const addChatMessage = async (
       message.receiver ??
       message.receiver_id ??
       userData?.user?.receiver_id ??
-      userData?.user?.dispatcher_id ??
-      2;
+      userData?.user?.dispatcher_id;
 
     let payload: any;
     let config: any = {};
@@ -360,7 +362,9 @@ export const addChatMessage = async (
       payload = new FormData();
       payload.append('report_id', String(reportId));
       payload.append('sender_id', String(userId));
-      payload.append('receiver_id', String(receiverId));
+      if (typeof receiverId === 'number' && Number.isFinite(receiverId) && receiverId > 0) {
+        payload.append('receiver_id', String(receiverId));
+      }
       payload.append('message', message.message.trim());
 
       const imageUri = message.image;
@@ -383,9 +387,11 @@ export const addChatMessage = async (
       payload = {
         report_id: reportId,
         sender_id: userId,
-        receiver_id: receiverId,
         message: message.message.trim(),
       };
+      if (typeof receiverId === 'number' && Number.isFinite(receiverId) && receiverId > 0) {
+        payload.receiver_id = receiverId;
+      }
 
       config = {};
     }

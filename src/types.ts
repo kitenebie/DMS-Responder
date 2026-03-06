@@ -29,6 +29,7 @@ export interface Incident {
   isAccepted: boolean
   receiver_id?: number | null;
   dispatcher_id?: number | null;
+  citizen_id?: number | null;
 }
 
 export interface HistoricalIncident {
@@ -106,6 +107,7 @@ export interface AppState {
   showHistory: boolean;
   isDarkMode: boolean;
   chatMessages: ChatMessage[];
+  activeChatTab?: 'dispatcher' | 'citizen';
   newMessage: string;
   historySearch: string;
   historyFilter: HistoryFilter;

@@ -25,6 +25,9 @@ interface ChatModalProps {
   onSendMessage: (message: string, images: string[]) => Promise<void> | void;
   isDarkMode: boolean;
   readOnly?: boolean;
+  chatTabs?: Array<{ key: 'dispatcher' | 'citizen'; label: string }>;
+  activeChatTab?: 'dispatcher' | 'citizen';
+  onChangeChatTab?: (tab: 'dispatcher' | 'citizen') => void;
 }
 
 export const ChatModal: React.FC<ChatModalProps> = ({
@@ -34,6 +37,9 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   onSendMessage,
   isDarkMode,
   readOnly = false,
+  chatTabs,
+  activeChatTab,
+  onChangeChatTab,
 }) => {
   const [inputText, setInputText] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -132,6 +138,26 @@ export const ChatModal: React.FC<ChatModalProps> = ({
           </View>
           <View style={styles.headerRight} />
         </View>
+        {chatTabs && chatTabs.length > 0 ? (
+          <View style={[styles.tabsWrap, { backgroundColor: theme.surface }]}>
+            <View style={[styles.tabsContainer, { backgroundColor: theme.surfaceAlt }]}>
+              {chatTabs.map((tab) => {
+                const isActive = activeChatTab === tab.key;
+                return (
+                  <TouchableOpacity
+                    key={tab.key}
+                    onPress={() => onChangeChatTab?.(tab.key)}
+                    style={[styles.tabButton, isActive && styles.tabButtonActive]}
+                  >
+                    <Text style={[styles.tabText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
+                      {tab.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         <ScrollView
           ref={scrollRef}
@@ -161,7 +187,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 )}
                 <Text style={[styles.messageText, { color: theme.text }]}>{msg.message}</Text>
                 {msg.image && (
-                  <TouchableOpacity onPress={() => setPreviewImage(msg.image)} style={styles.messageImageWrap}>
+                  <TouchableOpacity onPress={() => setPreviewImage(msg.image ?? null)} style={styles.messageImageWrap}>
                     <Image source={{ uri: msg.image }} style={styles.messageImage} resizeMode="cover" />
                   </TouchableOpacity>
                 )}
@@ -553,5 +579,27 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+  tabsWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 4,
+  },
+  tabButton: {
+    flex: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  tabButtonActive: {
+    backgroundColor: '#2563EB',
+  },
+  tabText: {
+    fontWeight: '700',
+    fontSize: 12,
   },
 });
