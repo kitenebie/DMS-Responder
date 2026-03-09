@@ -1,5 +1,15 @@
 import React from 'react';
-import { View, StyleSheet, Dimensions, StyleProp, ViewStyle } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Dimensions,
+  StyleProp,
+  ViewStyle,
+  NativeModules,
+  Platform,
+  UIManager,
+} from 'react-native';
 import { Incident as IncidentType } from '@/types';
 import MapScreen from './MapScreen';
 
@@ -16,6 +26,38 @@ interface MapProps {
   containerStyle?: StyleProp<ViewStyle>;
 }
 
+const MAPLIBRE_NATIVE_MODULE_NAME = 'MLRNModule';
+const MAPLIBRE_VIEW_MANAGER_NAME = 'MLRNMapView';
+const MAPLIBRE_ANDROID_TEXTURE_VIEW_MANAGER_NAME = 'MLRNAndroidTextureMapView';
+
+const hasViewManager = (name: string) => {
+  try {
+    if (typeof UIManager.getViewManagerConfig !== 'function') {
+      return true;
+    }
+
+    return Boolean(UIManager.getViewManagerConfig(name));
+  } catch {
+    return false;
+  }
+};
+
+const isMapLibreAvailable = () => {
+  const nativeModules = NativeModules as Record<string, unknown>;
+  if (!nativeModules[MAPLIBRE_NATIVE_MODULE_NAME]) {
+    return false;
+  }
+
+  if (Platform.OS !== 'android') {
+    return hasViewManager(MAPLIBRE_VIEW_MANAGER_NAME);
+  }
+
+  return (
+    hasViewManager(MAPLIBRE_ANDROID_TEXTURE_VIEW_MANAGER_NAME) ||
+    hasViewManager(MAPLIBRE_VIEW_MANAGER_NAME)
+  );
+};
+
 export const Map: React.FC<MapProps> = ({
   isDarkMode,
   isFullscreen,
@@ -27,8 +69,8 @@ export const Map: React.FC<MapProps> = ({
   mapHeight,
   containerStyle,
 }) => {
-
   const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 600);
+  const canRenderNativeMap = isMapLibreAvailable();
 
   return (
     <View
@@ -57,18 +99,40 @@ export const Map: React.FC<MapProps> = ({
         </View>
       </View>
 
-      {/* Map Screen - Always rendered to prevent re-mount on fullscreen toggle */}
-      <View style={[styles.mapScreenWrapper, { opacity: 1 }]}>
-        <MapScreen
-          onMapPress={onMapPress}
-          onMapRelease={onMapRelease}
-          isDarkMode={isDarkMode}
-          incident={incident}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={onToggleFullscreen}
-          showFullscreenToggle={showFullscreenToggle}
-        />
-      </View>
+      {canRenderNativeMap ? (
+        <View style={[styles.mapScreenWrapper, { opacity: 1 }]}>
+          <MapScreen
+            onMapPress={onMapPress}
+            onMapRelease={onMapRelease}
+            isDarkMode={isDarkMode}
+            incident={incident}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={onToggleFullscreen}
+            showFullscreenToggle={showFullscreenToggle}
+          />
+        </View>
+      ) : (
+        <View
+          style={[
+            styles.mapFallback,
+            {
+              backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.88)' : 'rgba(255, 255, 255, 0.94)',
+              borderColor: isDarkMode ? '#1E3A8A' : '#BFDBFE',
+            },
+          ]}>
+          <Text style={[styles.mapFallbackTitle, { color: isDarkMode ? '#F8FAFC' : '#0F172A' }]}>
+            Map unavailable in this build
+          </Text>
+          <Text
+            style={[
+              styles.mapFallbackBody,
+              { color: isDarkMode ? '#CBD5E1' : '#334155' },
+            ]}>
+            Rebuild and reinstall the responder development app so the MapLibre native view is
+            registered before loading this project.
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -172,5 +236,25 @@ const styles = StyleSheet.create({
   mapScreenWrapper: {
     position: 'absolute',
     inset: 0,
+  },
+  mapFallback: {
+    position: 'absolute',
+    inset: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  mapFallbackTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  mapFallbackBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
   },
 });

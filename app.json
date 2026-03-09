@@ -3,6 +3,7 @@
     "name": "responder",
     "slug": "responder",
     "version": "3.0.0",
+    "newArchEnabled": false,
     "web": {
       "favicon": "./assets/favicon.png"
     },
