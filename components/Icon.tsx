@@ -1,5 +1,5 @@
 import React from 'react';
-import { Svg, Path, Circle, Rect, G, Line } from 'react-native-svg';
+import { Svg, Path, Circle, Line } from 'react-native-svg';
 
 interface IconProps {
   name: string;
@@ -213,6 +213,12 @@ const MyLocationIcon = ({ size = 24, color = '#3B82F6' }: { size?: number; color
   </Svg>
 );
 
+const LayersIcon = ({ size = 24, color = '#3B82F6' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M12 2 1 7l11 5 9-4.09V17h2V7L12 2zm0 8.82L5.42 7.83 12 4.84l6.58 2.99L12 10.82zM3 11.91l9 4.09 9-4.09v2.18l-9 4.09-9-4.09v-2.18zm0 6 9 4.09 9-4.09V20l-9 4-9-4v-2.09z" />
+  </Svg>
+);
+
 // Main Icon component
 export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', style }) => {
   const iconProps = { size, color };
@@ -278,6 +284,8 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', 
       return <ClearedReportIcon {...iconProps} />;
     case 'my-location':
       return <MyLocationIcon {...iconProps} />;
+    case 'layers':
+      return <LayersIcon {...iconProps} />;
     default:
       return null;
   }

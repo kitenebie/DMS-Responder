@@ -1,6 +1,7 @@
 // ==================== DATA TYPES ====================
 
 export type IncidentStatus =
+  | 'Pending'
   | 'Active'
   | 'Ongoing'
   | 'Arrived'
@@ -63,6 +64,14 @@ export interface ChatMessage {
   timestamp?: string | null;
   sender_id?: number | null;
   receiver_id?: number | null;
+  peer_id?: number | null;
+  peer_name?: string | null;
+  sender_is_citizen?: boolean;
+  sender_is_responder?: boolean;
+  receiver_is_citizen?: boolean;
+  receiver_is_responder?: boolean;
+  peer_is_citizen?: boolean;
+  peer_is_responder?: boolean;
   status?: 'sending' | 'sent' | 'failed';
 }
 

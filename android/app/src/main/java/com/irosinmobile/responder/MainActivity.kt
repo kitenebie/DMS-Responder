@@ -1,13 +1,13 @@
-package com.juvybantal.responder
+package com.irosinmobile.responder
 
 import android.os.Build
 import android.os.Bundle
-
+import com.irosinmobile.responder.BuildConfig
+import com.irosinmobile.responder.R
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
-
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {

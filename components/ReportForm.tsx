@@ -6,12 +6,12 @@ import { getTheme } from '@/utils';
 import { ip } from './lib/domain';
 
 interface ReportFormProps {
-  form: ReportFormType;
-  onUpdateForm: (field: keyof ReportFormType, value: string) => void;
-  onSubmit: () => void;
+  form?: ReportFormType;
+  onUpdateForm?: (field: keyof ReportFormType, value: string) => void;
+  onSubmit?: () => void;
   photoUri?: string | null;
-  onPhotoCaptured: (uri: string) => void;
-  onRemovePhoto: () => void;
+  onPhotoCaptured?: (uri: string) => void;
+  onRemovePhoto?: () => void;
   submitting?: boolean;
   isDarkMode: boolean;
   incidentId?: string | number | null;

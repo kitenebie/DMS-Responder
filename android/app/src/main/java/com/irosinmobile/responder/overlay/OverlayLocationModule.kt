@@ -1,9 +1,13 @@
-package com.juvybantal.responder.overlay
+package com.irosinmobile.responder.overlay
 
+import android.Manifest
+import android.app.ActivityManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -59,6 +63,26 @@ class OverlayLocationModule(
       promise.reject(
         "OVERLAY_PERMISSION_DENIED",
         "Overlay permission is required before starting the floating bubble."
+      )
+      return
+    }
+
+    if (!hasAnyLocationPermission()) {
+      promise.reject(
+        "LOCATION_PERMISSION_DENIED",
+        "Location permission is required before starting the floating bubble."
+      )
+      return
+    }
+
+    if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+      !isAppInForeground() &&
+      !hasBackgroundLocationPermission()
+    ) {
+      promise.reject(
+        "OVERLAY_BACKGROUND_LOCATION_REQUIRED",
+        "Open the app first or grant 'Allow all the time' location permission."
       )
       return
     }
@@ -140,5 +164,37 @@ class OverlayLocationModule(
     } catch (error: Exception) {
       promise.reject("OVERLAY_PENDING_NAV_ERROR", "Failed to read pending overlay navigation.", error)
     }
+  }
+
+  private fun hasAnyLocationPermission(): Boolean {
+    val fineGranted = ContextCompat.checkSelfPermission(
+      reactContext,
+      Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+
+    val coarseGranted = ContextCompat.checkSelfPermission(
+      reactContext,
+      Manifest.permission.ACCESS_COARSE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+
+    return fineGranted || coarseGranted
+  }
+
+  private fun hasBackgroundLocationPermission(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+      return hasAnyLocationPermission()
+    }
+
+    return ContextCompat.checkSelfPermission(
+      reactContext,
+      Manifest.permission.ACCESS_BACKGROUND_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED
+  }
+
+  private fun isAppInForeground(): Boolean {
+    val processInfo = ActivityManager.RunningAppProcessInfo()
+    ActivityManager.getMyMemoryState(processInfo)
+    return processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+      processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
   }
 }

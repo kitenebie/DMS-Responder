@@ -2,7 +2,7 @@
   "expo": {
     "name": "responder",
     "slug": "responder",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "web": {
       "favicon": "./assets/favicon.png"
     },
@@ -30,7 +30,7 @@
       ],
       "expo-background-task"
     ],
-    "orientation": "landscape",
+    "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
@@ -69,9 +69,17 @@
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.INTERNET",
         "android.permission.WAKE_LOCK",
-        "com.google.android.c2dm.permission.RECEIVE"
+        "com.google.android.c2dm.permission.RECEIVE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION"
       ],
       "package": "com.irosinmobile.responder"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "59b9506b-2f6f-47d1-9f0d-790a82ad1dc8"
+      }
     }
   }
 }

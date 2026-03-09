@@ -5,42 +5,45 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
-  Modal,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  StatusBar,
+  Modal,
   Image,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatMessage } from '@/types';
 import { getTheme } from '@/utils';
 import { Icon } from './Icon';
 import { CameraCaptureModal } from './CameraCaptureModal';
 
-interface ChatModalProps {
-  visible: boolean;
+interface ChatScreenProps {
   messages: ChatMessage[];
-  onClose: () => void;
+  onBack: () => void;
   onSendMessage: (message: string, images: string[]) => Promise<void> | void;
   isDarkMode: boolean;
   readOnly?: boolean;
-  chatTabs?: Array<{ key: 'dispatcher' | 'citizen'; label: string }>;
+  chatTabs?: { key: 'dispatcher' | 'citizen'; label: string }[];
   activeChatTab?: 'dispatcher' | 'citizen';
   onChangeChatTab?: (tab: 'dispatcher' | 'citizen') => void;
+  title?: string;
+  subtitle?: string;
 }
 
-export const ChatModal: React.FC<ChatModalProps> = ({
-  visible,
+export const ChatScreen: React.FC<ChatScreenProps> = ({
   messages,
-  onClose,
+  onBack,
   onSendMessage,
   isDarkMode,
   readOnly = false,
   chatTabs,
   activeChatTab,
   onChangeChatTab,
+  title,
+  subtitle,
 }) => {
+  const insets = useSafeAreaInsets();
   const [inputText, setInputText] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [isSending, setIsSending] = useState(false);
@@ -49,20 +52,22 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const theme = getTheme(isDarkMode);
-  const keyboardOffset = Platform.OS === 'ios' ? 0 : (StatusBar.currentHeight ?? 0) + 8;
+  const keyboardOffset = Platform.OS === 'ios' ? 0 : insets.top;
   const canSend = !readOnly && (inputText.trim().length > 0 || selectedImages.length > 0);
   const headerTitle =
-    activeChatTab === 'citizen'
+    title ??
+    (activeChatTab === 'citizen'
       ? 'Citizen Chat'
       : activeChatTab === 'dispatcher'
         ? 'Dispatcher Chat'
-        : 'Dispatch Chat';
+        : 'Dispatch Chat');
   const headerSubtitle =
-    activeChatTab === 'citizen'
+    subtitle ??
+    (activeChatTab === 'citizen'
       ? 'Citizen conversation'
       : activeChatTab === 'dispatcher'
         ? 'Dispatcher conversation'
-        : 'Connected';
+        : 'Connected');
 
   const resolveSenderRoleLabel = (msg: ChatMessage): string | null => {
     if (msg.sender_is_citizen === true) {
@@ -85,12 +90,14 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   };
 
   useEffect(() => {
-    if (visible && messages.length > 0) {
-      setTimeout(() => {
+    if (messages.length > 0) {
+      const timeoutId = setTimeout(() => {
         scrollRef.current?.scrollToEnd({ animated: true });
       }, 100);
+
+      return () => clearTimeout(timeoutId);
     }
-  }, [visible, messages]);
+  }, [messages]);
 
   const handleSend = async () => {
     if (readOnly || isSending) return;
@@ -144,19 +151,19 @@ export const ChatModal: React.FC<ChatModalProps> = ({
   };
 
   return (
-    <Modal transparent={false} visible={visible} animationType="slide" statusBarTranslucent={false}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+      edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={keyboardOffset}
-        style={[styles.container, { backgroundColor: theme.background }]}
-      >
+        style={styles.container}>
         <View
           style={[
             styles.header,
             { backgroundColor: theme.surface, borderBottomColor: theme.border },
-          ]}
-        >
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          ]}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Icon name="close" size={24} color={theme.text} />
           </TouchableOpacity>
           <View style={styles.headerCenter}>
@@ -172,6 +179,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
           </View>
           <View style={styles.headerRight} />
         </View>
+
         {chatTabs && chatTabs.length > 0 ? (
           <View style={[styles.tabsWrap, { backgroundColor: theme.surface }]}>
             <View style={[styles.tabsContainer, { backgroundColor: theme.surfaceAlt }]}>
@@ -181,9 +189,12 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                   <TouchableOpacity
                     key={tab.key}
                     onPress={() => onChangeChatTab?.(tab.key)}
-                    style={[styles.tabButton, isActive && styles.tabButtonActive]}
-                  >
-                    <Text style={[styles.tabText, { color: isActive ? '#FFFFFF' : theme.textSecondary }]}>
+                    style={[styles.tabButton, isActive && styles.tabButtonActive]}>
+                    <Text
+                      style={[
+                        styles.tabText,
+                        { color: isActive ? '#FFFFFF' : theme.textSecondary },
+                      ]}>
                       {tab.label}
                     </Text>
                   </TouchableOpacity>
@@ -197,8 +208,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
           ref={scrollRef}
           style={styles.messagesContainer}
           contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-        >
+          showsVerticalScrollIndicator={false}>
           {messages.map((msg) => {
             const senderRoleLabel = resolveSenderRoleLabel(msg);
 
@@ -208,15 +218,15 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 style={[
                   styles.messageWrapper,
                   msg.isUser ? styles.messageRight : styles.messageLeft,
-                ]}
-              >
+                ]}>
                 <View
                   style={[
                     styles.messageBubble,
                     msg.isUser ? styles.bubbleUser : styles.bubbleOther,
-                    { backgroundColor: msg.isUser ? '#2563EB' : theme.surfaceAlt },
-                  ]}
-                >
+                    {
+                      backgroundColor: msg.isUser ? '#2563EB' : theme.surfaceAlt,
+                    },
+                  ]}>
                   {!msg.isUser && (
                     <Text style={[styles.senderName, { color: theme.textSecondary }]}>
                       {senderRoleLabel ? `${msg.sender} - ${senderRoleLabel}` : msg.sender}
@@ -224,8 +234,14 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                   )}
                   <Text style={[styles.messageText, { color: theme.text }]}>{msg.message}</Text>
                   {msg.image && (
-                    <TouchableOpacity onPress={() => setPreviewImage(msg.image ?? null)} style={styles.messageImageWrap}>
-                      <Image source={{ uri: msg.image }} style={styles.messageImage} resizeMode="cover" />
+                    <TouchableOpacity
+                      onPress={() => setPreviewImage(msg.image ?? null)}
+                      style={styles.messageImageWrap}>
+                      <Image
+                        source={{ uri: msg.image }}
+                        style={styles.messageImage}
+                        resizeMode="cover"
+                      />
                     </TouchableOpacity>
                   )}
                   <Text
@@ -233,8 +249,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                       styles.messageTime,
                       msg.isUser ? styles.timeUser : styles.timeOther,
                       { color: msg.isUser ? '#BFDBFE' : theme.textSecondary },
-                    ]}
-                  >
+                    ]}>
                     {msg.time}
                   </Text>
                   {msg.isUser && (
@@ -268,21 +283,20 @@ export const ChatModal: React.FC<ChatModalProps> = ({
             style={[
               styles.inputContainer,
               { borderTopColor: theme.border, backgroundColor: theme.surface },
-            ]}
-          >
+            ]}>
             {selectedImages.length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.attachmentsRow}
-              >
+                contentContainerStyle={styles.attachmentsRow}>
                 {selectedImages.map((uri, idx) => (
                   <View key={`${uri}-${idx}`} style={styles.attachmentChip}>
                     <Image source={{ uri }} style={styles.attachmentImage} />
                     <TouchableOpacity
-                      onPress={() => setSelectedImages((prev) => prev.filter((_, i) => i !== idx))}
-                      style={styles.attachmentRemove}
-                    >
+                      onPress={() =>
+                        setSelectedImages((prev) => prev.filter((_, imageIndex) => imageIndex !== idx))
+                      }
+                      style={styles.attachmentRemove}>
                       <Icon name="close" size={14} color="#fff" />
                     </TouchableOpacity>
                   </View>
@@ -311,12 +325,8 @@ export const ChatModal: React.FC<ChatModalProps> = ({
               />
               <TouchableOpacity
                 onPress={handleSend}
-                style={[
-                  styles.sendButton,
-                  (!canSend || isSending) && styles.sendButtonDisabled,
-                ]}
-                disabled={!canSend || isSending}
-              >
+                style={[styles.sendButton, (!canSend || isSending) && styles.sendButtonDisabled]}
+                disabled={!canSend || isSending}>
                 <Icon name="send" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
@@ -326,8 +336,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
             style={[
               styles.infoBox,
               { borderColor: theme.border, backgroundColor: theme.surfaceAlt },
-            ]}
-          >
+            ]}>
             <Icon name="info" size={16} color="#60A5FA" />
             <Text style={[styles.infoText, { color: theme.textSecondary }]}>
               History chat is read-only.
@@ -340,8 +349,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
         transparent
         visible={showAttachOptions}
         animationType="fade"
-        onRequestClose={() => setShowAttachOptions(false)}
-      >
+        onRequestClose={() => setShowAttachOptions(false)}>
         <TouchableOpacity style={styles.attachOverlay} onPress={() => setShowAttachOptions(false)}>
           <View style={[styles.attachSheet, { backgroundColor: theme.surface }]}>
             <TouchableOpacity style={styles.attachOption} onPress={handleTakePhoto}>
@@ -367,17 +375,20 @@ export const ChatModal: React.FC<ChatModalProps> = ({
         transparent
         visible={!!previewImage}
         animationType="fade"
-        onRequestClose={() => setPreviewImage(null)}
-      >
+        onRequestClose={() => setPreviewImage(null)}>
         <TouchableOpacity style={styles.previewOverlay} onPress={() => setPreviewImage(null)}>
           <View style={styles.previewContainer}>
             {previewImage && (
-              <Image source={{ uri: previewImage }} style={styles.previewImage} resizeMode="contain" />
+              <Image
+                source={{ uri: previewImage }}
+                style={styles.previewImage}
+                resizeMode="contain"
+              />
             )}
           </View>
         </TouchableOpacity>
       </Modal>
-    </Modal>
+    </SafeAreaView>
   );
 };
 
@@ -390,9 +401,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 50,
-    paddingBottom: 16,
     paddingHorizontal: 16,
+    paddingVertical: 16,
     backgroundColor: '#334155',
     borderBottomWidth: 1,
     borderBottomColor: '#475569',
@@ -573,7 +583,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     margin: 16,
-    marginBottom: 40,
   },
   infoText: {
     color: '#2563EB',

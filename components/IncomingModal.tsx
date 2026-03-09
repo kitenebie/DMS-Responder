@@ -51,7 +51,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
         return;
       }
 
-      const success = await acceptIncident(userId, incident.id);
+      const success = await acceptIncident(userId, incident.id ?? '');
       if (success) {
         setIsLoading(false);
         onAccept();
@@ -59,7 +59,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
         setError('Failed to accept incident');
         setIsLoading(false);
       }
-    } catch (err) {
+    } catch {
       setError('Error accepting incident');
       setIsLoading(false);
     }
@@ -83,7 +83,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
         return;
       }
 
-      const success = await declineIncident(userId, incident.id, declineReason.trim());
+      const success = await declineIncident(userId, incident.id ?? '', declineReason.trim());
       if (success) {
         setIsLoading(false);
         onDismiss();
@@ -91,7 +91,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
         setError('Failed to decline incident');
         setIsLoading(false);
       }
-    } catch (err) {
+    } catch {
       setError('Error declining incident');
       setIsLoading(false);
     }
@@ -153,7 +153,9 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                   <Icon name="clock" size={16} color="#4ADE80" />
                   <Text style={styles.infoLabel}>Time</Text>
                 </View>
-                <Text style={styles.infoValueSmall}>{formatTime(incident.timeReported)}</Text>
+                <Text style={styles.infoValueSmall}>
+                  {incident.timeReported ? formatTime(incident.timeReported) : 'N/A'}
+                </Text>
               </View>
             </View>
 

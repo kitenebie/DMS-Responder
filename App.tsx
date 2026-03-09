@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
@@ -13,21 +14,25 @@ import {
   useWindowDimensions,
   Platform,
   AppState as RNAppState,
+  Linking,
 } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
 import { Map } from './components/Map';
 import { IncomingModal } from './components/IncomingModal';
 import { IncidentDetails } from './components/IncidentDetails';
 import { StatusTracker } from './components/StatusTracker';
-import { ChatModal } from './components/ChatModal';
-import { HistoryModal } from './components/HistoryModal';
-import { ReportForm } from './components/ReportForm';
+import { ChatScreen } from './components/ChatScreen';
+import { HistoryScreen } from './components/HistoryScreen';
+import { ReportScreen } from './components/ReportScreen';
 import { ActionBar } from './components/ActionBar';
 import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
+import { navigationRef, navigate } from './components/lib/NavigationService';
 import { getCredentials, login, logout } from './components/lib/auth';
-import { sendLocation, stopLocationUpdates, submitReportForm } from './components/lib/axios';
+import { sendLocation, stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import {
   fetchIncomingIncident,
@@ -38,10 +43,11 @@ import {
 } from './src/mockData';
 import {
   AppState as ResponderAppState,
-  ReportForm as ReportFormType,
   IncidentStatus,
   Incident,
+  ChatMessage,
 } from './src/types';
+import { RootStackParamList } from './src/navigation/types';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Background from 'Background';
 import * as Location from 'expo-location';
@@ -55,9 +61,11 @@ import {
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import FirebaseNotificationService from './services/FirebaseNotificationService';
 
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
 const AppContent = () => {
   const insets = useSafeAreaInsets();
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const { height: screenHeight } = useWindowDimensions();
   const scrollViewRef = useRef<ScrollView>(null);
   const statusTrackerYRef = useRef(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -65,6 +73,10 @@ const AppContent = () => {
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(true);
   const [userName, setUserName] = useState(DEFAULT_CONFIG.responder_name);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  const [isNavigationReady, setIsNavigationReady] = useState(false);
+  const [chatScreenMode, setChatScreenMode] = useState<'live' | 'history'>('live');
+  const [historyChatMessages, setHistoryChatMessages] = useState<ChatMessage[]>([]);
+  const [historyChatTitle, setHistoryChatTitle] = useState('Incident Chat');
 
   const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
@@ -90,9 +102,10 @@ const AppContent = () => {
   const [incomingIncident, setIncomingIncident] = useState<Incident | null>(null);
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
   const overlayPermissionPromptShownRef = useRef(false);
+  const locationPermissionPromptShownRef = useRef(false);
   const stateRef = useRef(state);
+  const chatScreenModeRef = useRef(chatScreenMode);
   const refreshIncomingIncidentRef = useRef<() => Promise<void>>(async () => {});
   const openReportChatFromOverlayRef = useRef<(reportId: number) => Promise<void>>(async () => {});
 
@@ -107,7 +120,9 @@ const AppContent = () => {
 
   const resetIncidentState = useCallback(() => {
     setIncomingIncident(null);
-    setPhotoUri(null);
+    setChatScreenMode('live');
+    setHistoryChatMessages([]);
+    setHistoryChatTitle('Incident Chat');
     setState((prev) => ({
       ...prev,
       showIncomingModal: false,
@@ -173,6 +188,7 @@ const AppContent = () => {
       const messages = await fetchChatMessages(String(reportId));
 
       setIncomingIncident(resolvedIncident);
+      setChatScreenMode('live');
       setState((prev) => ({
         ...prev,
         showIncomingModal: false,
@@ -181,6 +197,7 @@ const AppContent = () => {
         activeChatTab: 'citizen',
         chatMessages: messages,
       }));
+      navigate('Chat');
     },
     [buildOverlayIncident, state.activeIncident]
   );
@@ -200,6 +217,101 @@ const AppContent = () => {
     }
   }, [openReportChatFromOverlay]);
 
+  const promptForBackgroundLocationSettings = useCallback((message: string) => {
+    if (locationPermissionPromptShownRef.current) {
+      return;
+    }
+
+    locationPermissionPromptShownRef.current = true;
+    Alert.alert(
+      'Allow "All the time" Location',
+      message,
+      [
+        {
+          text: 'Not now',
+          style: 'cancel',
+          onPress: () => {
+            locationPermissionPromptShownRef.current = false;
+          },
+        },
+        {
+          text: 'Open settings',
+          onPress: () => {
+            locationPermissionPromptShownRef.current = false;
+            void Linking.openSettings();
+          },
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => {
+          locationPermissionPromptShownRef.current = false;
+        },
+      }
+    );
+  }, []);
+
+  const ensureAndroidBackgroundLocationPermission = useCallback(
+    async (interactive = false): Promise<boolean> => {
+      if (Platform.OS !== 'android') {
+        return true;
+      }
+
+      let foregroundPermission = await Location.getForegroundPermissionsAsync();
+      if (foregroundPermission.status !== 'granted') {
+        if (!interactive) {
+          return false;
+        }
+
+        if (!foregroundPermission.canAskAgain) {
+          promptForBackgroundLocationSettings(
+            'Set location access to "Allow all the time" so the responder overlay can keep updating your position even while the app is minimized.'
+          );
+          return false;
+        }
+
+        foregroundPermission = await Location.requestForegroundPermissionsAsync();
+        if (foregroundPermission.status !== 'granted') {
+          if (!foregroundPermission.canAskAgain) {
+            promptForBackgroundLocationSettings(
+              'Location access is currently blocked. Open app settings and change it to "Allow all the time" for background responder tracking.'
+            );
+          }
+          return false;
+        }
+      }
+
+      let backgroundPermission = await Location.getBackgroundPermissionsAsync();
+      if (backgroundPermission.status === 'granted') {
+        locationPermissionPromptShownRef.current = false;
+        return true;
+      }
+
+      if (!interactive) {
+        return false;
+      }
+
+      if (!backgroundPermission.canAskAgain) {
+        promptForBackgroundLocationSettings(
+          'Choose "Allow all the time" for Location so the responder overlay can continue sending updates while the app is in the background.'
+        );
+        return false;
+      }
+
+      backgroundPermission = await Location.requestBackgroundPermissionsAsync();
+      if (backgroundPermission.status === 'granted') {
+        locationPermissionPromptShownRef.current = false;
+        return true;
+      }
+
+      promptForBackgroundLocationSettings(
+        'The floating responder bubble needs Location access set to "Allow all the time" so updates continue after you leave the app.'
+      );
+      return false;
+    },
+    [promptForBackgroundLocationSettings]
+  );
+
   const syncOverlayStateForAppState = useCallback(
     async (nextState: string) => {
       if (Platform.OS !== 'android') {
@@ -211,14 +323,10 @@ const AppContent = () => {
         return;
       }
 
-      const existingPermission = await Location.getForegroundPermissionsAsync();
-      let locationStatus = existingPermission.status;
-      if (locationStatus !== 'granted' && existingPermission.canAskAgain) {
-        const request = await Location.requestForegroundPermissionsAsync();
-        locationStatus = request.status;
-      }
-
-      if (locationStatus !== 'granted') {
+      const hasRequiredLocationPermission = await ensureAndroidBackgroundLocationPermission(
+        nextState === 'active'
+      );
+      if (!hasRequiredLocationPermission) {
         return;
       }
 
@@ -252,7 +360,7 @@ const AppContent = () => {
         }
       }
     },
-    [consumeOverlayNavigationIfAny, isLoggedIn]
+    [consumeOverlayNavigationIfAny, ensureAndroidBackgroundLocationPermission, isLoggedIn]
   );
 
   const refreshIncomingIncident = useCallback(async () => {
@@ -296,10 +404,11 @@ const AppContent = () => {
         remoteMessage.data?.reportId;
       const reportId = Number(reportIdRaw);
       const currentState = stateRef.current;
+      const isLiveChatVisible = currentState.showChat && chatScreenModeRef.current === 'live';
 
       if (notificationType === 'new_message' && Number.isFinite(reportId) && reportId > 0) {
         const activeReportId = Number(currentState.activeIncident?.id ?? 0);
-        if (currentState.showChat || activeReportId === reportId) {
+        if (isLiveChatVisible || activeReportId === reportId) {
           try {
             const messages = await fetchChatMessages(String(reportId));
             setState((prev) => {
@@ -348,12 +457,32 @@ const AppContent = () => {
   }, [state]);
 
   useEffect(() => {
+    chatScreenModeRef.current = chatScreenMode;
+  }, [chatScreenMode]);
+
+  useEffect(() => {
     refreshIncomingIncidentRef.current = refreshIncomingIncident;
   }, [refreshIncomingIncident]);
 
   useEffect(() => {
     openReportChatFromOverlayRef.current = openReportChatFromOverlay;
   }, [openReportChatFromOverlay]);
+
+  useEffect(() => {
+    if (!isNavigationReady) {
+      return;
+    }
+
+    const currentRoute = navigationRef.getCurrentRoute()?.name;
+    if (state.showChat && currentRoute !== 'Chat') {
+      navigate('Chat');
+      return;
+    }
+
+    if (state.showHistory && currentRoute !== 'History') {
+      navigate('History');
+    }
+  }, [isNavigationReady, state.showChat, state.showHistory]);
 
   useEffect(() => {
     const reportIdRaw = state.activeIncident?.id;
@@ -458,7 +587,7 @@ const AppContent = () => {
     };
 
     attemptAutoLogin();
-  }, []);
+  }, [resolveUserName]);
 
   // Fetch incoming incident every 3 seconds
   useEffect(() => {
@@ -516,49 +645,76 @@ const AppContent = () => {
     }));
   }, []);
 
-  const handleToggleChat = useCallback(() => {
-    setState((prev) => {
-      const nextShow = !prev.showChat;
-      const reportId = prev.activeIncident?.id ?? '';
-      const reportIdNum = Number(reportId);
-      if (nextShow && Number.isFinite(reportIdNum) && reportIdNum > 0) {
-        fetchChatMessages(String(reportIdNum)).then((messages) => {
-          setState((current) => ({
-            ...current,
-            chatMessages: messages,
-            activeChatTab: current.activeChatTab ?? 'citizen',
-          }));
-        });
-      }
-      return {
+  const handleOpenChat = useCallback(async () => {
+    const reportId = state.activeIncident?.id ?? '';
+    const reportIdNum = Number(reportId);
+    if (!Number.isFinite(reportIdNum) || reportIdNum <= 0) {
+      Alert.alert('No active report', 'Accept a dispatch first before opening live chat.');
+      return;
+    }
+
+    try {
+      const messages = await fetchChatMessages(String(reportIdNum));
+      setChatScreenMode('live');
+      setState((prev) => ({
         ...prev,
-        showChat: nextShow,
-      };
-    });
+        showChat: true,
+        chatMessages: messages,
+        activeChatTab: prev.activeChatTab ?? 'citizen',
+      }));
+      navigate('Chat');
+    } catch (error) {
+      console.warn('Failed to open live chat:', error);
+      Alert.alert('Error', 'Failed to load chat messages. Please try again.');
+    }
+  }, [state.activeIncident?.id]);
+
+  const handleCloseChat = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      showChat: false,
+    }));
   }, []);
 
   const handleOpenHistory = useCallback(() => {
-    setState((prev) => {
-      if (prev.showHistory) {
-        return prev;
-      }
-      return {
-        ...prev,
-        showHistory: true,
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      showHistory: true,
+    }));
+    navigate('History');
   }, []);
 
   const handleCloseHistory = useCallback(() => {
-    setState((prev) => {
-      if (!prev.showHistory) {
-        return prev;
-      }
-      return {
+    setState((prev) => ({
+      ...prev,
+      showHistory: false,
+    }));
+  }, []);
+
+  const handleOpenReport = useCallback(() => {
+    if (!state.activeIncident?.id) {
+      Alert.alert('No active report', 'There is no active incident report to open right now.');
+      return;
+    }
+
+    navigate('Report');
+  }, [state.activeIncident?.id]);
+
+  const handleOpenHistoryChat = useCallback(async (incidentId: string) => {
+    try {
+      const messages = await fetchChatMessages(incidentId);
+      setHistoryChatMessages(messages);
+      setHistoryChatTitle(`Incident #${incidentId}`);
+      setChatScreenMode('history');
+      setState((prev) => ({
         ...prev,
-        showHistory: false,
-      };
-    });
+        showChat: true,
+      }));
+      navigate('Chat');
+    } catch (error) {
+      console.warn('Failed to open history chat:', error);
+      Alert.alert('Error', 'Failed to load history chat. Please try again.');
+    }
   }, []);
 
   const handleToggleTheme = useCallback(() => {
@@ -598,6 +754,7 @@ const AppContent = () => {
       newMessage: '',
     }));
     setIsLoggedIn(false);
+    setIsNavigationReady(false);
     setUserName(DEFAULT_CONFIG.responder_name);
     setCurrentUserId(null);
   }, [resetIncidentState]);
@@ -646,10 +803,11 @@ const AppContent = () => {
       if (!message.trim() && images.length === 0) return;
 
       const reportTitle = state.activeIncident?.type ?? 'Incident';
+      const conversationTarget = state.activeChatTab === 'dispatcher' ? 'dispatcher' : 'citizen';
       const receiverId =
-        state.activeChatTab === 'dispatcher'
+        conversationTarget === 'dispatcher'
           ? state.activeIncident?.dispatcher_id ?? undefined
-          : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? undefined;
+          : state.activeIncident?.citizen_id ?? undefined;
       const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const tempIds: number[] = [];
 
@@ -665,6 +823,13 @@ const AppContent = () => {
               time: nowTime,
               isUser: true,
               image: imageUri,
+              sender_id: currentUserId ?? undefined,
+              receiver_id: receiverId ?? undefined,
+              peer_id: receiverId ?? undefined,
+              sender_is_citizen: false,
+              sender_is_responder: true,
+              peer_is_citizen: conversationTarget === 'citizen',
+              peer_is_responder: false,
               status: 'sending' as const,
             };
           });
@@ -681,6 +846,7 @@ const AppContent = () => {
               timestamp: new Date().toISOString(),
               image: imageUri,
               receiver_id: receiverId,
+              conversation_target: conversationTarget,
             });
           }
         } else {
@@ -696,6 +862,13 @@ const AppContent = () => {
                 message: message.trim(),
                 time: nowTime,
                 isUser: true,
+                sender_id: currentUserId ?? undefined,
+                receiver_id: receiverId ?? undefined,
+                peer_id: receiverId ?? undefined,
+                sender_is_citizen: false,
+                sender_is_responder: true,
+                peer_is_citizen: conversationTarget === 'citizen',
+                peer_is_responder: false,
                 status: 'sending',
               },
             ],
@@ -707,6 +880,7 @@ const AppContent = () => {
             sender: 'user',
             timestamp: new Date().toISOString(),
             receiver_id: receiverId,
+            conversation_target: conversationTarget,
           });
         }
 
@@ -730,7 +904,7 @@ const AppContent = () => {
         Alert.alert('Error', 'Failed to send message. Please try again.');
       }
     },
-    [state.activeChatTab, state.activeIncident]
+    [currentUserId, state.activeChatTab, state.activeIncident]
   );
   const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
     setState((prev) => ({
@@ -752,15 +926,45 @@ const AppContent = () => {
     return state.chatMessages.filter((msg) => {
       const senderId = msg.sender_id ?? null;
       const receiverId = msg.receiver_id ?? null;
-      const peerId = senderId === selfId ? receiverId : senderId;
+      const peerId = msg.peer_id ?? (senderId === selfId ? receiverId : senderId);
+      const peerIsCitizen =
+        typeof msg.peer_is_citizen === 'boolean'
+          ? msg.peer_is_citizen
+          : senderId === selfId
+            ? msg.receiver_is_citizen
+            : msg.sender_is_citizen;
 
       if (activeTab === 'dispatcher') {
-        return dispatcherId ? peerId === dispatcherId : true;
+        if (dispatcherId) {
+          return peerId === dispatcherId;
+        }
+
+        return typeof peerIsCitizen === 'boolean' ? peerIsCitizen === false : true;
       }
 
-      return citizenId ? peerId === citizenId : true;
+      if (citizenId) {
+        return peerId === citizenId;
+      }
+
+      return typeof peerIsCitizen === 'boolean' ? peerIsCitizen === true : true;
     });
   }, [currentUserId, state.activeChatTab, state.activeIncident?.citizen_id, state.activeIncident?.dispatcher_id, state.activeIncident?.receiver_id, state.chatMessages]);
+
+  const chatMessagesForScreen =
+    chatScreenMode === 'history' ? historyChatMessages : filteredChatMessages;
+  const chatScreenTitle =
+    chatScreenMode === 'history'
+      ? historyChatTitle
+      : state.activeChatTab === 'dispatcher'
+        ? 'Dispatcher Chat'
+        : 'Citizen Chat';
+  const chatScreenSubtitle =
+    chatScreenMode === 'history'
+      ? 'Historical conversation'
+      : state.activeChatTab === 'dispatcher'
+        ? 'Dispatcher conversation'
+        : 'Citizen conversation';
+
   const theme = {
     background: isDarkMode ? '#0F172A' : '#F8FAFC',
     surface: isDarkMode ? '#1E293B' : '#FFFFFF',
@@ -769,9 +973,8 @@ const AppContent = () => {
     textSecondary: isDarkMode ? '#94A3B8' : '#475569',
   };
   const isStatusCompleted = state.currentStatus === 'Completed';
-  const mapShouldBeFullscreen = state.isMapFullscreen || isStatusCompleted;
-  const isLandscape = screenWidth > screenHeight;
-  const landscapeMapHeight = Math.max(screenHeight - insets.top - 128, 280);
+  const mapShouldBeFullscreen = state.isMapFullscreen;
+  const portraitMapHeight = Math.min(Math.max(screenHeight * 0.34, 280), 360);
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -852,111 +1055,46 @@ const AppContent = () => {
     </View>
   );
 
-  if (isLandscape) {
-    return (
-      <ThemeProvider>
-        <Background />
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-          <StatusBar />
-          {renderHeader()}
+  const formatIncidentTime = (timestamp?: string | null) => {
+    if (!timestamp) {
+      return 'Monitoring';
+    }
 
-          <View style={styles.landscapeContent}>
-            <View style={styles.landscapeMapPane}>
-              <Map
-                isDarkMode={isDarkMode}
-                isFullscreen={false}
-                incident={state.activeIncident}
-                onToggleFullscreen={handleToggleMapFullscreen}
-                onRestoreSize={handleRestoreMapSize}
-                onMapPress={() => setIsMapInteracting(true)}
-                onMapRelease={() => setIsMapInteracting(false)}
-                showFullscreenToggle={false}
-                mapHeight={landscapeMapHeight}
-              />
-            </View>
+    try {
+      return new Date(timestamp.replace(' ', 'T')).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return 'Monitoring';
+    }
+  };
 
-            <View
-              style={[
-                styles.landscapeSidePane,
-                { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
-              ]}>
-              {state.activeIncident ? (
-                <ScrollView
-                  style={styles.landscapePanelScroll}
-                  contentContainerStyle={styles.landscapePanelScrollContent}
-                  showsVerticalScrollIndicator={false}>
-                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Menu</Text>
-                  <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
-                    {state.activeIncident.type}
-                  </Text>
-                  <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
-                  <Text style={[styles.landscapeSectionTitle, { color: theme.text }]}>
-                    Status Timeline
-                  </Text>
-                  <StatusTracker
-                    incidentId={state.activeIncident.id}
-                    onUpdateStatus={handleUpdateStatus}
-                    isDarkMode={isDarkMode}
-                  />
-                </ScrollView>
-              ) : (
-                <View style={styles.landscapeHistoryPanel}>
-                  <Text style={[styles.landscapePanelTitle, { color: theme.text }]}>Menu</Text>
-                  <Text style={[styles.landscapePanelSubtitle, { color: theme.textSecondary }]}>
-                    No active report. Open incident history.
-                  </Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.landscapeHistoryButton,
-                      { backgroundColor: DEFAULT_CONFIG.primary_color },
-                    ]}
-                    onPress={handleOpenHistory}>
-                    <Icon name="history" size={20} color="#fff" />
-                    <Text style={styles.landscapeHistoryButtonText}>Open History</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
+  const renderSectionHeader = (eyebrow: string, title: string, subtitle: string) => (
+    <View style={styles.sectionHeaderBlock}>
+      <Text style={[styles.sectionEyebrow, { color: DEFAULT_CONFIG.primary_color }]}>{eyebrow}</Text>
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+      <Text style={[styles.sectionSubtitle, { color: theme.textSecondary }]}>{subtitle}</Text>
+    </View>
+  );
 
-          {incomingIncident !== null && (
-            <IncomingModal
-              visible={state.showIncomingModal}
-              incident={incomingIncident}
-              onAccept={handleAcceptIncident}
-              onDismiss={handleDismissIncident}
-            />
-          )}
+  const renderHeroMetric = (label: string, value: string) => (
+    <View
+      style={[
+        styles.heroMetricCard,
+        { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
+      ]}>
+      <Text style={[styles.heroMetricLabel, { color: theme.textSecondary }]}>{label}</Text>
+      <Text style={[styles.heroMetricValue, { color: theme.text }]} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  );
 
-          <ChatModal
-            visible={state.showChat}
-            messages={filteredChatMessages}
-            onClose={handleToggleChat}
-            onSendMessage={handleSendMessage}
-            isDarkMode={isDarkMode}
-            chatTabs={[
-              { key: 'dispatcher', label: 'Dispatcher' },
-              { key: 'citizen', label: 'Citizen' },
-            ]}
-            activeChatTab={state.activeChatTab ?? 'citizen'}
-            onChangeChatTab={handleChangeChatTab}
-          />
-
-          <HistoryModal
-            visible={state.showHistory}
-            onClose={handleCloseHistory}
-            isDarkMode={isDarkMode}
-          />
-
-          {renderLogoutModal()}
-        </SafeAreaView>
-      </ThemeProvider>
-    );
-  }
-
-  if (state.isMapFullscreen) {
-    return (
-      <ThemeProvider>
+  const renderHomeScreen = () => {
+    if (state.isMapFullscreen) {
+      return (
         <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
           <StatusBar />
           {renderHeader(true)}
@@ -968,155 +1106,303 @@ const AppContent = () => {
             onRestoreSize={handleRestoreMapSize}
             showFullscreenToggle={!isStatusCompleted}
           />
-          {renderLogoutModal()}
         </View>
-      </ThemeProvider>
-    );
-  }
+      );
+    }
 
-  if (!state.activeIncident) {
     return (
-      <ThemeProvider>
-        <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
+      <>
+        <Background />
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
           <StatusBar />
-          {renderHeader(true)}
-          <Map
-            isDarkMode={isDarkMode}
-            isFullscreen={true}
-            incident={null}
-            onToggleFullscreen={() => {}}
-            onRestoreSize={() => {}}
-            onMapPress={() => setIsMapInteracting(true)}
-            onMapRelease={() => setIsMapInteracting(false)}
-            showFullscreenToggle={false}
-          />
+          {renderHeader()}
 
-          <TouchableOpacity
-            style={[styles.floatingHistoryButton, { backgroundColor: theme.surface }]}
-            onPress={handleOpenHistory}>
-            <Icon name="history" size={26} color={theme.text} />
-          </TouchableOpacity>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.mainContent}
+            contentContainerStyle={[
+              styles.mainContentContainer,
+              { paddingBottom: Math.max(insets.bottom, 16) + 24 },
+            ]}
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={!isMapInteracting}>
+            <View
+              style={[
+                styles.heroCard,
+                { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
+              ]}>
+              <View style={styles.heroHeaderBlock}>
+                <View style={styles.heroCopy}>
+                  <Text style={[styles.heroEyebrow, { color: DEFAULT_CONFIG.primary_color }]}>
+                    {state.activeIncident ? 'Live Response' : 'Responder Standby'}
+                  </Text>
+                  <Text style={[styles.heroTitle, { color: theme.text }]}>
+                    {state.activeIncident ? state.activeIncident.type : 'Waiting for incoming reports'}
+                  </Text>
+                  <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
+                    {state.activeIncident
+                      ? state.activeIncident.location || 'Location details are not available.'
+                      : 'Your map, location tracking, and history tools stay ready while no dispatch is assigned.'}
+                  </Text>
+                </View>
 
-          {incomingIncident !== null && (
-            <IncomingModal
-              visible={state.showIncomingModal}
-              incident={incomingIncident}
-              onAccept={handleAcceptIncident}
-              onDismiss={handleDismissIncident}
-            />
-          )}
+                <View
+                  style={[
+                    styles.heroStatusPill,
+                    {
+                      backgroundColor: state.activeIncident
+                        ? STATUS_COLORS[state.currentStatus] || STATUS_COLORS.Pending
+                        : theme.surfaceAlt,
+                    },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.heroStatusPillText,
+                      !state.activeIncident && { color: theme.text },
+                    ]}>
+                    {state.activeIncident ? state.currentStatus : 'Available'}
+                  </Text>
+                </View>
+              </View>
 
-          <HistoryModal
-            visible={state.showHistory}
-            onClose={handleCloseHistory}
-            isDarkMode={isDarkMode}
-          />
-          {renderLogoutModal()}
-        </View>
-      </ThemeProvider>
+              <View style={styles.heroMetaRow}>
+                <View
+                  style={[
+                    styles.heroMetaChip,
+                    { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
+                  ]}>
+                  <Icon name="document" size={14} color={DEFAULT_CONFIG.primary_color} />
+                  <Text style={[styles.heroMetaText, { color: theme.text }]}>
+                    {state.activeIncident ? `Report #${state.activeIncident.id}` : 'Standby Mode'}
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.heroMetaChip,
+                    { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
+                  ]}>
+                  <Icon name="clock" size={14} color={DEFAULT_CONFIG.primary_color} />
+                  <Text style={[styles.heroMetaText, { color: theme.text }]}>
+                    {state.activeIncident
+                      ? formatIncidentTime(state.activeIncident.timeReported)
+                      : 'Live map ready'}
+                  </Text>
+                </View>
+              </View>
+
+              <Map
+                isDarkMode={isDarkMode}
+                isFullscreen={mapShouldBeFullscreen}
+                incident={state.activeIncident}
+                onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
+                onRestoreSize={handleRestoreMapSize}
+                onMapPress={() => setIsMapInteracting(true)}
+                onMapRelease={() => setIsMapInteracting(false)}
+                showFullscreenToggle={!isStatusCompleted}
+                mapHeight={portraitMapHeight}
+                containerStyle={styles.heroMap}
+              />
+
+              <View style={styles.heroMetricsRow}>
+                {renderHeroMetric(
+                  'Status',
+                  state.activeIncident ? state.currentStatus : 'Available'
+                )}
+                {renderHeroMetric('Responder', userName)}
+                {renderHeroMetric(
+                  'Last Update',
+                  state.activeIncident
+                    ? formatIncidentTime(state.activeIncident.timeReported)
+                    : 'Monitoring'
+                )}
+              </View>
+            </View>
+
+            {state.activeIncident ? (
+              <>
+                {state.currentStatus !== 'Completed' && (
+                  <>
+                    {renderSectionHeader(
+                      'Fast Access',
+                      'Quick Actions',
+                      'Open the tools you need first while actively responding.'
+                    )}
+                    <QuickAccess
+                      onOpenChat={handleOpenChat}
+                      onOpenHistory={handleOpenHistory}
+                      onOpenReport={handleOpenReport}
+                      onOpenStatus={handleScrollToStatus}
+                      currentStatus={state.currentStatus}
+                      isDarkMode={isDarkMode}
+                      onUpdateStatus={handleUpdateStatus}
+                    />
+                  </>
+                )}
+
+                {renderSectionHeader(
+                  'Dispatch Summary',
+                  'Incident Details',
+                  'Review the assigned report, timeline, and responder reference info.'
+                )}
+                <IncidentDetails
+                  incident={state.activeIncident}
+                  responderName={DEFAULT_CONFIG.responder_name}
+                  isDarkMode={isDarkMode}
+                />
+
+                {renderSectionHeader(
+                  'Progress',
+                  'Status Timeline',
+                  'Update the incident as the team moves from dispatch to completion.'
+                )}
+                <View
+                  onLayout={(event) => {
+                    statusTrackerYRef.current = event.nativeEvent.layout.y;
+                  }}>
+                  <StatusTracker
+                    incidentId={state.activeIncident.id}
+                    onUpdateStatus={handleUpdateStatus}
+                    isDarkMode={isDarkMode}
+                    onOpenReportForm={handleOpenReport}
+                  />
+                </View>
+
+                {renderSectionHeader(
+                  'Communication',
+                  'Team Actions',
+                  'Jump into report chat or open previously handled incident history.'
+                )}
+                <ActionBar
+                  onOpenChat={handleOpenChat}
+                  onOpenHistory={handleOpenHistory}
+                  onOpenReport={handleOpenReport}
+                />
+              </>
+            ) : (
+              <>
+                {renderSectionHeader(
+                  'Standby Queue',
+                  'No Active Report',
+                  'Stay ready while the system continues monitoring for new incidents.'
+                )}
+                <View
+                  style={[
+                    styles.emptyStateCard,
+                    { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
+                  ]}>
+                  <View
+                    style={[
+                      styles.emptyStateIconWrap,
+                      { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
+                    ]}>
+                    <Icon name="history" size={22} color={DEFAULT_CONFIG.primary_color} />
+                  </View>
+                  <Text style={[styles.emptyStateTitle, { color: theme.text }]}>
+                    No active report assigned
+                  </Text>
+                  <Text style={[styles.emptyStateBody, { color: theme.textSecondary }]}>
+                    Keep the live map visible, confirm your location is updating, and use history to
+                    review previous responses while waiting for the next dispatch.
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.emptyStateButton,
+                      { backgroundColor: DEFAULT_CONFIG.primary_color },
+                    ]}
+                    onPress={handleOpenHistory}>
+                    <Icon name="history" size={18} color="#fff" />
+                    <Text style={styles.emptyStateButtonText}>Open History</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </>
     );
-  }
+  };
 
   return (
     <ThemeProvider>
-      <Background />
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-        <StatusBar />
-
-        {/* Header */}
-        {renderHeader()}
-
-        {/* Main Content */}
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.mainContent}
-          contentContainerStyle={styles.mainContentContainer}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={!isMapInteracting}>
-          <Map
-            isDarkMode={isDarkMode}
-            isFullscreen={mapShouldBeFullscreen}
-            incident={state.activeIncident}
-            onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
-            onRestoreSize={handleRestoreMapSize}
-            onMapPress={() => setIsMapInteracting(true)}
-            onMapRelease={() => setIsMapInteracting(false)}
-            showFullscreenToggle={!isStatusCompleted}
-          />
-
-          {state.activeIncident ? (
-            <>
-              {state.currentStatus !== 'Completed' && (
-                <QuickAccess
-                  onOpenChat={handleToggleChat}
-                  onOpenHistory={handleOpenHistory}
-                  onOpenStatus={handleScrollToStatus}
-                  currentStatus={state.currentStatus}
-                  isDarkMode={isDarkMode}
-                  onUpdateStatus={handleUpdateStatus}
-                />
-              )}
-              <IncidentDetails
-                incident={state.activeIncident}
-                responderName={DEFAULT_CONFIG.responder_name}
+      <NavigationContainer ref={navigationRef} onReady={() => setIsNavigationReady(true)}>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Home">{() => renderHomeScreen()}</Stack.Screen>
+          <Stack.Screen
+            name="Chat"
+            listeners={{
+              focus: () => {
+                setState((prev) => ({ ...prev, showChat: true }));
+              },
+              blur: () => {
+                handleCloseChat();
+                if (chatScreenModeRef.current === 'history') {
+                  setChatScreenMode('live');
+                  setHistoryChatMessages([]);
+                  setHistoryChatTitle('Incident Chat');
+                }
+              },
+            }}>
+            {({ navigation }) => (
+              <ChatScreen
+                messages={chatMessagesForScreen}
+                onBack={() => navigation.goBack()}
+                onSendMessage={handleSendMessage}
+                isDarkMode={isDarkMode}
+                readOnly={chatScreenMode === 'history'}
+                chatTabs={
+                  chatScreenMode === 'live'
+                    ? [
+                        { key: 'dispatcher', label: 'Dispatcher' },
+                        { key: 'citizen', label: 'Citizen' },
+                      ]
+                    : undefined
+                }
+                activeChatTab={chatScreenMode === 'live' ? state.activeChatTab ?? 'citizen' : undefined}
+                onChangeChatTab={chatScreenMode === 'live' ? handleChangeChatTab : undefined}
+                title={chatScreenTitle}
+                subtitle={chatScreenSubtitle}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen
+            name="History"
+            listeners={{
+              focus: () => {
+                setState((prev) => ({ ...prev, showHistory: true }));
+              },
+              blur: handleCloseHistory,
+            }}>
+            {({ navigation }) => (
+              <HistoryScreen
+                onBack={() => navigation.goBack()}
+                onOpenChat={handleOpenHistoryChat}
                 isDarkMode={isDarkMode}
               />
-              <View
-                onLayout={(event) => {
-                  statusTrackerYRef.current = event.nativeEvent.layout.y;
-                }}>
-                <StatusTracker
-                  incidentId={state.activeIncident.id}
-                  onUpdateStatus={handleUpdateStatus}
-                  isDarkMode={isDarkMode}
-                />
-              </View>
-              <ActionBar onOpenChat={handleToggleChat} onOpenHistory={handleOpenHistory} />
-            </>
-          ) : (
-            <View style={styles.noIncidentContainer}>
-              <TouchableOpacity
-                style={[styles.historyButton, { backgroundColor: theme.surface }]}
-                onPress={handleOpenHistory}>
-                <Icon name="history" size={20} color={theme.text} />
-                <Text style={[styles.historyButtonText, { color: theme.text }]}>History</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </ScrollView>
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="Report">
+            {({ navigation }) => (
+              <ReportScreen
+                incidentId={state.activeIncident?.id}
+                isDarkMode={isDarkMode}
+                onBack={() => navigation.goBack()}
+              />
+            )}
+          </Stack.Screen>
+        </Stack.Navigator>
+      </NavigationContainer>
 
-        {/* Modals */}
-        {incomingIncident !== null && (
-          <IncomingModal
-            visible={state.showIncomingModal}
-            incident={incomingIncident}
-            onAccept={handleAcceptIncident}
-            onDismiss={handleDismissIncident}
-          />
-        )}
-
-        <ChatModal
-          visible={state.showChat}
-          messages={filteredChatMessages}
-          onClose={handleToggleChat}
-          onSendMessage={handleSendMessage}
-          isDarkMode={isDarkMode}
-          chatTabs={[
-            { key: 'dispatcher', label: 'Dispatcher' },
-            { key: 'citizen', label: 'Citizen' },
-          ]}
-          activeChatTab={state.activeChatTab ?? 'citizen'}
-          onChangeChatTab={handleChangeChatTab}
+      {incomingIncident !== null && (
+        <IncomingModal
+          visible={state.showIncomingModal}
+          incident={incomingIncident}
+          onAccept={handleAcceptIncident}
+          onDismiss={handleDismissIncident}
         />
+      )}
 
-        <HistoryModal
-          visible={state.showHistory}
-          onClose={handleCloseHistory}
-          isDarkMode={isDarkMode}
-        />
-
-        {renderLogoutModal()}
-      </SafeAreaView>
+      {renderLogoutModal()}
     </ThemeProvider>
   );
 };
@@ -1212,62 +1498,117 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 16,
   },
-  landscapeContent: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 16,
-    padding: 16,
-  },
-  landscapeMapPane: {
-    flex: 1.8,
-  },
-  landscapeSidePane: {
-    flex: 1,
-    minWidth: 280,
-    maxWidth: 380,
-    borderRadius: 12,
+  heroCard: {
+    borderRadius: 22,
     borderWidth: 1,
-    overflow: 'hidden',
+    padding: 16,
+    gap: 14,
+    shadowColor: '#020617',
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
-  landscapePanelScroll: {
-    flex: 1,
-  },
-  landscapePanelScrollContent: {
-    padding: 12,
-    gap: 12,
-  },
-  landscapePanelTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  landscapePanelSubtitle: {
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  landscapeSectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  landscapeHistoryPanel: {
-    flex: 1,
-    padding: 14,
-    justifyContent: 'center',
-    gap: 12,
-  },
-  landscapeHistoryButton: {
+  heroHeaderBlock: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  heroCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  heroEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    lineHeight: 28,
+  },
+  heroSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  heroStatusPill: {
+    minWidth: 88,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
   },
-  landscapeHistoryButtonText: {
-    color: '#FFFFFF',
+  heroStatusPillText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  heroMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  heroMetaText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  heroMap: {
+    borderRadius: 18,
+  },
+  heroMetricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  heroMetricCard: {
+    flex: 1,
+    minHeight: 78,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    justifyContent: 'space-between',
+  },
+  heroMetricLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  heroMetricValue: {
     fontSize: 14,
     fontWeight: '700',
+    lineHeight: 18,
+  },
+  sectionHeaderBlock: {
+    gap: 2,
+    marginTop: 2,
+  },
+  sectionEyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
   },
   modalOverlay: {
     flex: 1,
@@ -1318,48 +1659,50 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  noIncidentContainer: {
-    flexDirection: 'row',
+  emptyStateCard: {
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 22,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    paddingVertical: 16,
-  },
-  noIncidentText: {
-    fontSize: 14,
-  },
-  historyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  historyButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  floatingHistoryButton: {
-    position: 'absolute',
-    right: 16,
-    top: 150,
-    width: 46,
-    height: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    display: 'flex',
-    justifyContent: 'center',
-    borderRadius: 50,
+    gap: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
-  floatingHistoryText: {
+  emptyStateIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptyStateBody: {
     fontSize: 14,
-    fontWeight: '600',
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  emptyStateButton: {
+    marginTop: 4,
+    minWidth: 180,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  emptyStateButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

@@ -1,4 +1,4 @@
-package com.juvybantal.responder.overlay
+package com.irosinmobile.responder.overlay
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -32,7 +32,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
-import com.juvybantal.responder.R
+import com.irosinmobile.responder.R
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -71,7 +71,7 @@ class LocationOverlayService : Service() {
     private const val PREF_LAST_REPORT_ID = "last_report_id"
     private const val CHANNEL_ID = "overlay_location_channel"
     private const val NOTIFICATION_ID = 4051
-    private const val LOCATION_UPDATE_INTERVAL_MS = 8_000L
+    private const val LOCATION_UPDATE_INTERVAL_MS = 15_000L
     private const val SCREEN_REPORT_CHATS = "ReportChats"
     private const val WAKE_LOCK_TAG = "Responder:OverlayLocationServiceWakeLock"
     private val running = AtomicBoolean(false)
@@ -106,7 +106,6 @@ class LocationOverlayService : Service() {
     windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
     createNotificationChannel()
     acquirePartialWakeLock()
-    startPeriodicLocationUpdates()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -129,6 +128,8 @@ class LocationOverlayService : Service() {
       stopSelf()
       return START_NOT_STICKY
     }
+
+    startPeriodicLocationUpdates()
 
     when (intent?.action) {
       ACTION_SET_VISIBILITY -> {
@@ -265,8 +266,8 @@ class LocationOverlayService : Service() {
       gravity = Gravity.CENTER
     }
 
-    val bubbleSize = dp(68)
-    val iconPadding = dp(10)
+    val bubbleSize = dp(70)
+    val iconPadding = dp(1)
 
     val overlayIcon = ImageView(this).apply {
       setImageResource(R.drawable.overlay_location_icon)
@@ -274,7 +275,7 @@ class LocationOverlayService : Service() {
       setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
       background = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(Color.parseColor("#FFFFFF23"))
+        setColor(Color.TRANSPARENT)
       }
       layoutParams = LinearLayout.LayoutParams(bubbleSize, bubbleSize)
       elevation = dp(6).toFloat()

@@ -1,4 +1,4 @@
-package com.juvybantal.responder.overlay
+package com.irosinmobile.responder.overlay
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

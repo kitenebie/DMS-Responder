@@ -14,6 +14,30 @@ import {
 
 export const HISTORY_PAGE_SIZE = 10;
 
+const parseBooleanFlag = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value === 1 ? true : value === 0 ? false : undefined;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes'].includes(normalized)) {
+      return true;
+    }
+    if (['0', 'false', 'no'].includes(normalized)) {
+      return false;
+    }
+  }
+  return undefined;
+};
+
+const parseOptionalId = (value: unknown): number | null => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
 // Helper function to determine current status from API response
 export const getCurrentStatus = (statusData: ReportStatus | null): IncidentStatus => {
   if (!statusData) return 'Pending';
@@ -305,6 +329,16 @@ export const fetchChatMessages = async (reportId: string): Promise<ChatMessage[]
             ? rawImage
             : `${ip}/storage/${rawImage}`
           : null;
+      const senderIsCitizen = parseBooleanFlag(item.sender_is_citizen);
+      const senderIsResponder = parseBooleanFlag(item.sender_is_responder);
+      const receiverIsCitizen = parseBooleanFlag(item.receiver_is_citizen);
+      const receiverIsResponder = parseBooleanFlag(item.receiver_is_responder);
+      const peerIsCitizen =
+        parseBooleanFlag(item.peer_is_citizen) ??
+        (Boolean(item.isUser) ? receiverIsCitizen : senderIsCitizen);
+      const peerIsResponder =
+        parseBooleanFlag(item.peer_is_responder) ??
+        (Boolean(item.isUser) ? receiverIsResponder : senderIsResponder);
 
       return {
         id: Number(item.id ?? 0),
@@ -314,8 +348,16 @@ export const fetchChatMessages = async (reportId: string): Promise<ChatMessage[]
         isUser: Boolean(item.isUser),
         image,
         timestamp: item.timestamp ?? null,
-        sender_id: item.sender_id ?? null,
-        receiver_id: item.receiver_id ?? null,
+        sender_id: parseOptionalId(item.sender_id),
+        receiver_id: parseOptionalId(item.receiver_id),
+        peer_id: parseOptionalId(item.peer_id),
+        peer_name: item.peer_name ?? null,
+        sender_is_citizen: senderIsCitizen,
+        sender_is_responder: senderIsResponder,
+        receiver_is_citizen: receiverIsCitizen,
+        receiver_is_responder: receiverIsResponder,
+        peer_is_citizen: peerIsCitizen,
+        peer_is_responder: peerIsResponder,
       };
     });
   } catch (error: any) {
@@ -333,6 +375,7 @@ export const addChatMessage = async (
     sender?: string;
     receiver?: number;
     receiver_id?: number;
+    conversation_target?: 'citizen' | 'dispatcher';
     timestamp?: string;
     image?: string;
   }
@@ -349,11 +392,7 @@ export const addChatMessage = async (
       throw new Error('User not authenticated');
     }
 
-    const receiverId =
-      message.receiver ??
-      message.receiver_id ??
-      userData?.user?.receiver_id ??
-      userData?.user?.dispatcher_id;
+    const receiverId = message.receiver ?? message.receiver_id;
 
     let payload: any;
     let config: any = {};
@@ -364,6 +403,9 @@ export const addChatMessage = async (
       payload.append('sender_id', String(userId));
       if (typeof receiverId === 'number' && Number.isFinite(receiverId) && receiverId > 0) {
         payload.append('receiver_id', String(receiverId));
+      }
+      if (message.conversation_target) {
+        payload.append('conversation_target', message.conversation_target);
       }
       payload.append('message', message.message.trim());
 
@@ -391,6 +433,9 @@ export const addChatMessage = async (
       };
       if (typeof receiverId === 'number' && Number.isFinite(receiverId) && receiverId > 0) {
         payload.receiver_id = receiverId;
+      }
+      if (message.conversation_target) {
+        payload.conversation_target = message.conversation_target;
       }
 
       config = {};

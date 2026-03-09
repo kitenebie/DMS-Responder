@@ -28,7 +28,7 @@ export const Map: React.FC<MapProps> = ({
   containerStyle,
 }) => {
 
-  const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 560);
+  const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 600);
 
   return (
     <View

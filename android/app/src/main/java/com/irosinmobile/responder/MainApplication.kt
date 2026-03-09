@@ -1,6 +1,8 @@
-package com.juvybantal.responder
-import com.juvybantal.responder.overlay.OverlayLocationPackage
+package com.irosinmobile.responder
 
+import com.irosinmobile.responder.BuildConfig
+import com.irosinmobile.responder.R
+import com.irosinmobile.responder.overlay.OverlayLocationPackage
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Application

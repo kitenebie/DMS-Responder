@@ -43,7 +43,7 @@ export const IncidentDetails: React.FC<IncidentDetailsProps> = ({
         <View style={[styles.gridItem, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
           <Text style={[styles.label, { color: theme.textSecondary }]}>Time Reported</Text>
           <Text style={[styles.value, { color: theme.text }]}>
-            {formatTime(incident.timeReported)}
+            {incident.timeReported ? formatTime(incident.timeReported) : 'N/A'}
           </Text>
         </View>
 

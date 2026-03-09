@@ -5,9 +5,14 @@ import { Icon } from './Icon';
 interface ActionBarProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
+  onOpenReport: () => void;
 }
 
-export const ActionBar: React.FC<ActionBarProps> = ({ onOpenChat, onOpenHistory }) => {
+export const ActionBar: React.FC<ActionBarProps> = ({
+  onOpenChat,
+  onOpenHistory,
+  onOpenReport,
+}) => {
   return (
     <View style={styles.container}>
       <TouchableOpacity onPress={onOpenChat} style={styles.chatButton}>
@@ -19,6 +24,11 @@ export const ActionBar: React.FC<ActionBarProps> = ({ onOpenChat, onOpenHistory 
         <Icon name="history" size={18} color="#fff" />
         <Text style={styles.buttonText}>History</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity onPress={onOpenReport} style={styles.reportButton}>
+        <Icon name="document" size={18} color="#fff" />
+        <Text style={styles.buttonText}>Report</Text>
+      </TouchableOpacity>
     </View>
   );
 };
@@ -26,11 +36,13 @@ export const ActionBar: React.FC<ActionBarProps> = ({ onOpenChat, onOpenHistory 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
     marginTop: 16,
   },
   chatButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
     backgroundColor: '#2563EB',
     borderRadius: 12,
     paddingVertical: 14,
@@ -40,8 +52,20 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   historyButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
     backgroundColor: '#7C3AED',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  reportButton: {
+    flexGrow: 1,
+    flexBasis: '30%',
+    backgroundColor: '#10B981',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',

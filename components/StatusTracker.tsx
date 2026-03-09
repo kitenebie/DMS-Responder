@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, ScrollView, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { IncidentStatus, ReportStatus, ReportForm } from '@/types';
 import {
   STATUS_FLOW,
@@ -12,13 +12,13 @@ import { getTheme } from '@/utils';
 import { submitReportForm } from './lib/axios';
 import { Icon } from './Icon';
 import { ReportForm as ReportFormComponent } from './ReportForm';
-import { he } from 'filepond/locale/he-he';
 
 interface StatusTrackerProps {
   incidentId?: string|null;
   onUpdateStatus: (status: IncidentStatus) => void;
   isDarkMode: boolean;
   currentStatus?: IncidentStatus;
+  onOpenReportForm?: () => void;
 }
 
 const statusIconNames: Record<string, string> = {
@@ -64,8 +64,14 @@ const getTimestamp = (status: string, reportStatus: ReportStatus | null): string
   }
 };
 
-export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpdateStatus, isDarkMode }) => {
+export const StatusTracker: React.FC<StatusTrackerProps> = ({
+  incidentId,
+  onUpdateStatus,
+  isDarkMode,
+  onOpenReportForm,
+}) => {
   const theme = getTheme(isDarkMode);
+  const normalizedIncidentId = incidentId ?? undefined;
   const [reportStatus, setReportStatus] = useState<ReportStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -85,7 +91,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
   // Refresh status from API
   const refreshStatus = async () => {
     try {
-      const statusData = await fetchReportStatus(incidentId);
+      const statusData = await fetchReportStatus(normalizedIncidentId);
 
       // Validate that Incident.id matches ReportStatus.report_id
       if (statusData && incidentId) {
@@ -112,6 +118,10 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
   const handleUpdateStatus = async (status: IncidentStatus) => {
     // If clicking Completed, show report form instead of confirmation
     if (status === 'Completed') {
+      if (onOpenReportForm) {
+        onOpenReportForm();
+        return;
+      }
       setReportFormVisible(true);
       return;
     }
@@ -128,7 +138,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
     console.log(`Updating status to: ${pendingStatus}`);
 
     try {
-      const success = await updateReportStatus({ status: pendingStatus, reportId: incidentId ?? undefined });
+      const success = await updateReportStatus({ status: pendingStatus, reportId: normalizedIncidentId });
       if (success) {
         // Notify parent component
         onUpdateStatus(pendingStatus);
@@ -162,7 +172,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
     
     try {
       // Submit the report form to API
-      await submitReportForm(reportFormData, photoUri, incidentId);
+      await submitReportForm(reportFormData, photoUri, normalizedIncidentId);
       
       setReportFormVisible(false);
       setPendingStatus('Completed');
@@ -209,7 +219,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
       });
 
       try {
-        const fetchPromise = fetchReportStatus(incidentId);
+        const fetchPromise = fetchReportStatus(normalizedIncidentId);
         const statusData = (await Promise.race([
           fetchPromise,
           timeoutPromise,
@@ -249,7 +259,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({ incidentId, onUpda
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [incidentId, normalizedIncidentId]);
 
   const currentStatus = getCurrentStatus(reportStatus);
   const currentIndex = STATUS_FLOW.indexOf(currentStatus);

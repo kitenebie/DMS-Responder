@@ -8,6 +8,7 @@ import { getTheme } from '@/utils';
 interface QuickAccessProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
+  onOpenReport?: () => void;
   onOpenStatus?: () => void;
   currentStatus: IncidentStatus;
   isDarkMode: boolean;
@@ -17,6 +18,7 @@ interface QuickAccessProps {
 export const QuickAccess: React.FC<QuickAccessProps> = ({
   onOpenChat,
   onOpenHistory,
+  onOpenReport,
   onOpenStatus,
   currentStatus,
   isDarkMode,
@@ -82,6 +84,45 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
           </View>
           <Icon name="chevron-right" size={16} color={theme.textSecondary} style={styles.chevron} />
         </TouchableOpacity>
+
+        <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+        <TouchableOpacity onPress={onOpenHistory} style={styles.quickButton}>
+          <View style={[styles.iconContainer, { backgroundColor: '#7C3AED' }]}>
+            <Icon name="history" size={20} color="#fff" />
+          </View>
+          <View style={styles.buttonContent}>
+            <Text style={[styles.buttonLabel, { color: theme.text }]}>History</Text>
+            <Text style={[styles.buttonSubtext, { color: theme.textSecondary }]}>
+              Review closed incidents
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={16} color={theme.textSecondary} style={styles.chevron} />
+        </TouchableOpacity>
+
+        {onOpenReport ? (
+          <>
+            <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+            <TouchableOpacity onPress={onOpenReport} style={styles.quickButton}>
+              <View style={[styles.iconContainer, { backgroundColor: '#10B981' }]}>
+                <Icon name="document" size={20} color="#fff" />
+              </View>
+              <View style={styles.buttonContent}>
+                <Text style={[styles.buttonLabel, { color: theme.text }]}>Report</Text>
+                <Text style={[styles.buttonSubtext, { color: theme.textSecondary }]}>
+                  Open responder form
+                </Text>
+              </View>
+              <Icon
+                name="chevron-right"
+                size={16}
+                color={theme.textSecondary}
+                style={styles.chevron}
+              />
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
 
       {/* Full Screen Status Modal */}
