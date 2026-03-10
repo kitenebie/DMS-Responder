@@ -26,7 +26,7 @@ export const getDeviceId = async () => {
       // Generate a simple UUID-like string
       deviceId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         const r = Math.random() * 16 | 0;
-        const v = c == 'x' ? r : (r & 0x3 | 0x8);
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
       });
       await AsyncStorage.setItem('device_id', deviceId);
@@ -105,7 +105,7 @@ export const login = async (email: string, password: string, rememberMe: boolean
       const message = error.response.data?.message || 'Invalid credentials';
 
       if (errorCode === 'USER_NOT_FOUND') {
-        throw new Error('User not found or not authorized as dispatcher');
+        throw new Error('User not found or not authorized as responder');
       } else if (errorCode === 'INVALID_PASSWORD') {
         throw new Error('Incorrect password');
       } else {

@@ -333,6 +333,11 @@ class MapService {
       throw new Error('Invalid report ID');
     }
 
+    const declineReason = typeof reason === 'string' ? reason.trim() : '';
+    if (!declineReason) {
+      throw new Error('Decline reason is required');
+    }
+
     return this.retryWithBackoff(
       async () => {
         try {
@@ -342,7 +347,7 @@ class MapService {
             throw new Error('User ID not found');
           }
 
-          const payload = reason ? { reason } : {};
+          const payload = { decline_reason: declineReason };
           const response = await api.post(
             `/responder/report/${userId}/${reportId}/decline`,
             payload,

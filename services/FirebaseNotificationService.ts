@@ -1,5 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import type { FirebaseMessagingTypes, Messaging } from '@react-native-firebase/messaging';
+import {
+  getInitialNotification,
+  getMessaging,
+  getToken,
+  onMessage,
+  onNotificationOpenedApp,
+  onTokenRefresh,
+  registerDeviceForRemoteMessages,
+  requestPermission as requestFirebasePermission,
+} from '@react-native-firebase/messaging';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
@@ -34,36 +44,40 @@ class FirebaseNotificationService {
   private openedListenerUnsubscribe: (() => void) | null = null;
   private tokenRefreshUnsubscribe: (() => void) | null = null;
 
+  private messagingInstance(): Messaging {
+    return getMessaging();
+  }
+
   async initialize(callbacks: NotificationCallbacks = {}): Promise<string | null> {
     await this.requestPermissions();
     await this.registerDeviceForRemoteMessages();
 
     try {
-      this.currentToken = await messaging().getToken();
+      this.currentToken = await getToken(this.messagingInstance());
     } catch (error) {
       console.warn('Failed to read FCM token during initialization:', error);
     }
 
     this.cleanupListeners();
 
-    this.foregroundListenerUnsubscribe = messaging().onMessage(async (remoteMessage) => {
+    this.foregroundListenerUnsubscribe = onMessage(this.messagingInstance(), async (remoteMessage) => {
       await this.presentForegroundNotification(remoteMessage);
       await callbacks.onForegroundMessage?.(remoteMessage);
     });
 
-    this.openedListenerUnsubscribe = messaging().onNotificationOpenedApp((remoteMessage) => {
+    this.openedListenerUnsubscribe = onNotificationOpenedApp(this.messagingInstance(), (remoteMessage) => {
       if (remoteMessage) {
         void callbacks.onNotificationOpened?.(remoteMessage);
       }
     });
 
-    this.tokenRefreshUnsubscribe = messaging().onTokenRefresh((token) => {
+    this.tokenRefreshUnsubscribe = onTokenRefresh(this.messagingInstance(), (token) => {
       this.currentToken = token;
       void this.syncTokenForStoredUser(token);
     });
 
     if (!this.initialNotificationHandled) {
-      const initialNotification = await messaging().getInitialNotification();
+      const initialNotification = await getInitialNotification(this.messagingInstance());
       if (initialNotification) {
         await callbacks.onNotificationOpened?.(initialNotification);
       }
@@ -81,7 +95,7 @@ class FirebaseNotificationService {
     await this.registerDeviceForRemoteMessages();
 
     try {
-      this.currentToken = await messaging().getToken();
+      this.currentToken = await getToken(this.messagingInstance());
       return this.currentToken;
     } catch (error) {
       console.warn('Failed to get FCM token:', error);
@@ -140,7 +154,7 @@ class FirebaseNotificationService {
     }
 
     try {
-      await messaging().requestPermission();
+      await requestFirebasePermission(this.messagingInstance());
     } catch (error) {
       console.warn('Firebase messaging permission request failed:', error);
     }
@@ -148,7 +162,7 @@ class FirebaseNotificationService {
 
   private async registerDeviceForRemoteMessages(): Promise<void> {
     try {
-      await messaging().registerDeviceForRemoteMessages();
+      await registerDeviceForRemoteMessages(this.messagingInstance());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!message.toLowerCase().includes('already')) {
