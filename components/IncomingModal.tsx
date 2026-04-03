@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, ActivityIndicator, Animated } from 'react-native';
+import { useAudioPlayer } from 'expo-audio';
 import { Incident } from '@/types';
 import { formatTime } from '@/utils';
 import { Icon } from './Icon';
@@ -23,6 +24,37 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
   const [declineReason, setDeclineReason] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showFullImage, setShowFullImage] = useState(false);
+  const player = useAudioPlayer(require('../assets/alert.mp3'));
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [visible]);
+
+  useEffect(() => {
+    if (visible) {
+      player.loop = true;
+      player.play();
+    } else {
+      try { player.pause(); player.seekTo(0); } catch {}
+    }
+    return () => {
+      try { player.pause(); } catch {}
+    };
+  }, [visible]);
+
+  const stopAlert = () => {
+    try { player.pause(); player.seekTo(0); } catch {}
+  };
 
   const getStoredUserId = async (): Promise<string> => {
     try {
@@ -53,6 +85,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
 
       const success = await acceptIncident(userId, incident.id ?? '');
       if (success) {
+        stopAlert();
         setIsLoading(false);
         onAccept();
       } else {
@@ -85,6 +118,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
 
       const success = await declineIncident(userId, incident.id ?? '', declineReason.trim());
       if (success) {
+        stopAlert();
         setIsLoading(false);
         onDismiss();
       } else {
@@ -107,9 +141,24 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
   };
 
   return (
+    <>
     <Modal transparent visible={visible} animationType="fade" statusBarTranslucent>
       <View style={styles.overlay}>
-        <View style={styles.modal}>
+        <Animated.View
+          style={[
+            styles.modalWrapper,
+            { opacity: 1 },
+          ]}>
+          <Animated.View
+            style={[
+              styles.pulseRing,
+              {
+                transform: [{ scale: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.045] }) }],
+                opacity: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.55] }),
+              },
+            ]}
+          />
+          <View style={styles.modal}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerIconContainer}>
@@ -128,11 +177,13 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                 <Icon name="image" size={16} color="#60A5FA" />
                 <Text style={styles.infoLabel}>Attachment</Text>
               </View>
-              <Image
-                source={{ uri: incident.report_attachment }}
-                style={styles.attachmentImage}
-                resizeMode="cover"
-              />
+              <TouchableOpacity onPress={() => setShowFullImage(true)}>
+                <Image
+                  source={{ uri: incident.report_attachment }}
+                  style={styles.attachmentImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
             </View>
           )}
 
@@ -220,7 +271,6 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
-                      <Icon name="close" size={18} color="#fff" />
                       <Text style={styles.declineButtonText}>Confirm Decline</Text>
                     </>
                   )}
@@ -229,16 +279,9 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
             ) : (
               <>
                 <TouchableOpacity
-                  onPress={handleDismiss}
-                  style={styles.dismissButton}
-                  disabled={isLoading}>
-                  <Text style={styles.dismissButtonText}>Dismiss</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
                   onPress={() => setShowDeclineOptions(true)}
                   style={[styles.declineOptionButton, isLoading && styles.buttonDisabled]}
                   disabled={isLoading}>
-                  <Icon name="close" size={18} color="#fff" />
                   <Text style={styles.declineOptionButtonText}>Decline</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -249,7 +292,6 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <>
-                      <Icon name="check" size={18} color="#fff" />
                       <Text style={styles.acceptButtonText}>Accept</Text>
                     </>
                   )}
@@ -257,9 +299,26 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
               </>
             )}
           </View>
-        </View>
+          </View>
+        </Animated.View>
       </View>
     </Modal>
+
+    {/* Full Image Modal */}
+    <Modal transparent visible={showFullImage} animationType="fade" onRequestClose={() => setShowFullImage(false)}>
+      <TouchableOpacity
+        style={styles.fullImageOverlay}
+        onPress={() => setShowFullImage(false)}
+        activeOpacity={1}
+      >
+        <Image
+          source={{ uri: incident.report_attachment }}
+          style={styles.fullImage}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
+    </Modal>
+    </>
   );
 };
 
@@ -279,6 +338,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334155',
     overflow: 'hidden',
+  },
+  modalWrapper: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 16,
+  },
+  pulseRing: {
+    position: 'absolute',
+    top: -12,
+    left: -12,
+    right: -12,
+    bottom: -12,
+    borderRadius: 24,
+    borderWidth: 3,
+    borderColor: '#DC2626',
+    backgroundColor: 'rgba(220, 38, 38, 0.18)',
   },
   header: {
     backgroundColor: '#DC2626',
@@ -456,5 +531,15 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  fullImageOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImage: {
+    width: '100%',
+    height: '100%',
   },
 });

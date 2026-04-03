@@ -5,13 +5,11 @@ import { Icon } from './Icon';
 interface ActionBarProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
-  onOpenReport: () => void;
 }
 
 export const ActionBar: React.FC<ActionBarProps> = ({
   onOpenChat,
   onOpenHistory,
-  onOpenReport,
 }) => {
   return (
     <View style={styles.container}>
@@ -23,11 +21,6 @@ export const ActionBar: React.FC<ActionBarProps> = ({
       <TouchableOpacity onPress={onOpenHistory} style={styles.historyButton}>
         <Icon name="history" size={18} color="#fff" />
         <Text style={styles.buttonText}>History</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity onPress={onOpenReport} style={styles.reportButton}>
-        <Icon name="document" size={18} color="#fff" />
-        <Text style={styles.buttonText}>Report</Text>
       </TouchableOpacity>
     </View>
   );

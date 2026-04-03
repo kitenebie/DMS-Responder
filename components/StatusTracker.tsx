@@ -1,5 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  Pressable,
+  SafeAreaView,
+} from 'react-native';
 import { IncidentStatus, ReportStatus, ReportForm } from '@/types';
 import {
   STATUS_FLOW,
@@ -14,7 +26,7 @@ import { Icon } from './Icon';
 import { ReportForm as ReportFormComponent } from './ReportForm';
 
 interface StatusTrackerProps {
-  incidentId?: string|null;
+  incidentId?: string | null;
   onUpdateStatus: (status: IncidentStatus) => void;
   isDarkMode: boolean;
   currentStatus?: IncidentStatus;
@@ -138,7 +150,10 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
     console.log(`Updating status to: ${pendingStatus}`);
 
     try {
-      const success = await updateReportStatus({ status: pendingStatus, reportId: normalizedIncidentId });
+      const success = await updateReportStatus({
+        status: pendingStatus,
+        reportId: normalizedIncidentId,
+      });
       if (success) {
         // Notify parent component
         onUpdateStatus(pendingStatus);
@@ -161,19 +176,19 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
 
   // Handle report form changes
   const handleReportFormUpdate = (field: keyof ReportForm, value: string) => {
-    setReportFormData(prev => ({ ...prev, [field]: value }));
+    setReportFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   // Submit report form and update status
   const handleReportFormSubmit = async () => {
     if (submittingForm) return;
-    
+
     setSubmittingForm(true);
-    
+
     try {
       // Submit the report form to API
       await submitReportForm(reportFormData, photoUri, normalizedIncidentId);
-      
+
       setReportFormVisible(false);
       setPendingStatus('Completed');
       setConfirmModalVisible(true);
@@ -282,14 +297,17 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View
+        style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <View style={styles.header}>
           <Icon name="clock" size={20} color="#FBBF24" />
           <Text style={[styles.title, { color: theme.text }]}>Status Timeline</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color="#FBBF24" />
-          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading status...</Text>
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Loading status...
+          </Text>
         </View>
       </View>
     );
@@ -298,7 +316,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
   // Show error if status mismatch
   if (statusError) {
     return (
-      <View style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View
+        style={[styles.container, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <View style={styles.header}>
           <Icon name="clock" size={20} color="#FBBF24" />
           <Text style={[styles.title, { color: theme.text }]}>Status Timeline</Text>
@@ -461,21 +480,26 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
         transparent
         visible={confirmModalVisible}
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={cancelStatusUpdate}>
-          <TouchableOpacity style={styles.modalOverlay} onPress={cancelStatusUpdate}>
-          <TouchableOpacity
+        <View style={[styles.modalOverlay, { padding: 24 }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cancelStatusUpdate} />
+          <View
             style={[
               styles.modalContent,
               { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
-            onPress={(e) => e.stopPropagation()}>
+            ]}>
             <Text style={[styles.modalTitle, { color: theme.text }]}>Are you sure?</Text>
             <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>
               Do you want to update the status to {pendingStatus}?
             </Text>
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton, { backgroundColor: theme.surfaceAlt }]}
+                style={[
+                  styles.modalButton,
+                  styles.cancelButton,
+                  { backgroundColor: theme.surfaceAlt },
+                ]}
                 onPress={cancelStatusUpdate}>
                 <Text style={[styles.cancelButtonText, { color: theme.text }]}>Cancel</Text>
               </TouchableOpacity>
@@ -485,8 +509,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
                 <Text style={styles.confirmButtonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Report Form Modal */}
@@ -494,38 +518,58 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
         transparent
         visible={reportFormVisible}
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={cancelReportForm}>
         <KeyboardAvoidingView
-          style={styles.modalOverlay}
+          style={[styles.reportFormOverlay, { backgroundColor: theme.background }]}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}>
-          <TouchableOpacity style={styles.modalOverlayInner} onPress={cancelReportForm}>
-            <TouchableOpacity
+          <SafeAreaView style={styles.reportFormModalContent}>
+            <View
               style={[
-                styles.reportFormModalContent,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-              ]}
-              onPress={(e) => e.stopPropagation()}>
-                <ReportFormComponent
-                  form={reportFormData}
-                  onUpdateForm={handleReportFormUpdate}
-                  onSubmit={handleReportFormSubmit}
-                  photoUri={photoUri}
-                  onPhotoCaptured={handlePhotoCaptured}
-                  onRemovePhoto={handleRemovePhoto}
-                  submitting={submittingForm}
-                  isDarkMode={isDarkMode}
-                  incidentId={incidentId}
-                />
-                <View style={[styles.modalButtonContainer]}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton, { marginTop: 16 }]}
-                  onPress={cancelReportForm}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-          </TouchableOpacity>
+                styles.reportFormHeader,
+                { backgroundColor: theme.surface, borderBottomColor: theme.border },
+              ]}>
+              <Text style={[styles.reportFormHeaderTitle, { color: theme.text }]}>Report Form</Text>
+              <TouchableOpacity
+                onPress={cancelReportForm}
+                style={styles.reportFormCloseButton}
+                accessibilityRole="button"
+                accessibilityLabel="Close report form">
+                <Icon name="close" size={20} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.reportFormBody, { backgroundColor: theme.surface }]}>
+              <ReportFormComponent
+                form={reportFormData}
+                onUpdateForm={handleReportFormUpdate}
+                onSubmit={handleReportFormSubmit}
+                photoUri={photoUri}
+                onPhotoCaptured={handlePhotoCaptured}
+                onRemovePhoto={handleRemovePhoto}
+                submitting={submittingForm}
+                isDarkMode={isDarkMode}
+                incidentId={incidentId}
+              />
+            </View>
+
+            <View
+              style={[
+                styles.reportFormFooter,
+                { backgroundColor: theme.surface, borderTopColor: theme.border },
+              ]}>
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  styles.cancelButton,
+                  { backgroundColor: theme.surfaceAlt },
+                ]}
+                onPress={cancelReportForm}>
+                <Text style={[styles.cancelButtonText, { color: theme.text }]}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -658,18 +702,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  modalButtonContainer:{
-    position: 'absolute',
-    bottom: 0,
-    alignSelf: 'center',
-    padding: 4,
-    width: '100%',
-    backgroundColor: '#0F172A',
-    height: 100,
-  },
   modalButton: {
-    alignSelf: 'center',
-    width: '100%',
+    flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
@@ -688,19 +722,43 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
   },
-  reportFormModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 0,
-    padding: 0,
-    width: '100%',
-    height: '100%',
-    borderWidth: 0,
-    paddingBottom: 100,
-  },
-  modalOverlayInner: {
+  reportFormOverlay: {
     flex: 1,
-    justifyContent: 'flex-start',
-    alignItems: 'stretch',
     width: '100%',
+  },
+  reportFormModalContent: {
+    flex: 1,
+    width: '100%',
+  },
+  reportFormHeader: {
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reportFormHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  reportFormCloseButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 20,
+  },
+  reportFormBody: {
+    flex: 1,
+    width: '100%',
+  },
+  reportFormFooter: {
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
+    borderTopWidth: 1,
   },
 });

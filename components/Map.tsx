@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,8 @@ interface MapProps {
   showFullscreenToggle?: boolean;
   mapHeight?: number;
   containerStyle?: StyleProp<ViewStyle>;
+  isMovingBearingEnabled?: boolean;
+  onMovingBearingChange?: (enabled: boolean) => void;
 }
 
 const MAPLIBRE_NATIVE_MODULE_NAME = 'MLRNModule';
@@ -68,7 +70,13 @@ export const Map: React.FC<MapProps> = ({
   showFullscreenToggle,
   mapHeight,
   containerStyle,
+  isMovingBearingEnabled: isMovingBearingEnabledProp,
+  onMovingBearingChange,
 }) => {
+  const [isMovingBearingEnabledLocal, setIsMovingBearingEnabledLocal] = useState(false);
+  const isMovingBearingEnabled = isMovingBearingEnabledProp ?? isMovingBearingEnabledLocal;
+  const setIsMovingBearingEnabled = onMovingBearingChange ?? setIsMovingBearingEnabledLocal;
+
   const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 600);
   const canRenderNativeMap = isMapLibreAvailable();
 
@@ -84,6 +92,15 @@ export const Map: React.FC<MapProps> = ({
         },
       ]}
     >
+      {/* Map Height Label */}
+      {!isFullscreen && (
+        <View style={styles.heightLabel} pointerEvents="none">
+          <Text style={[styles.heightLabelText, isDarkMode && styles.heightLabelTextDark]}>
+            {resolvedMapHeight}px
+          </Text>
+        </View>
+      )}
+
       {/* Map Grid Overlay */}
       <View style={styles.mapGrid} />
 
@@ -93,7 +110,6 @@ export const Map: React.FC<MapProps> = ({
           <View className="w-full h-full">
             <View className="flex-1 items-center justify-center">
               {/* Main roads */}
-              
             </View>
           </View>
         </View>
@@ -109,6 +125,8 @@ export const Map: React.FC<MapProps> = ({
             isFullscreen={isFullscreen}
             onToggleFullscreen={onToggleFullscreen}
             showFullscreenToggle={showFullscreenToggle}
+            isMovingBearingEnabled={isMovingBearingEnabled}
+            onMovingBearingChange={setIsMovingBearingEnabled}
           />
         </View>
       ) : (
@@ -256,5 +274,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
+  },
+  heightLabel: {
+    position: 'absolute',
+    top: 8,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    zIndex: 10,
+  },
+  heightLabelText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  heightLabelTextDark: {
+    color: '#cbd5e1',
   },
 });

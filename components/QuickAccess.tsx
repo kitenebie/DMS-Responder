@@ -100,7 +100,7 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
           <Icon name="chevron-right" size={16} color={theme.textSecondary} style={styles.chevron} />
         </TouchableOpacity>
 
-        {onOpenReport ? (
+        {/* {onOpenReport ? (
           <>
             <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
@@ -122,7 +122,7 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
               />
             </TouchableOpacity>
           </>
-        ) : null}
+        ) : null} */}
       </View>
 
       {/* Full Screen Status Modal */}

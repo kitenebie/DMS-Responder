@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Incident } from '../src/types';
@@ -6,20 +6,16 @@ import {
   MapView,
   UserLocation,
   Camera,
+  type CameraRef,
   PointAnnotation,
   ShapeSource,
   LineLayer,
   UserTrackingMode,
 } from '@maplibre/maplibre-react-native';
-import * as Speech from 'expo-speech';
 import { locationService, type LocationCoords } from './services/locationService';
 import { useRouteStore } from './routeStore';
 import { Icon } from './Icon';
-import {
-  MapTileSelectorModal,
-  type MapLayerKey,
-  type MapTileOption,
-} from './MapTileSelectorModal';
+import { MapTileSelectorModal, type MapLayerKey, type MapTileOption } from './MapTileSelectorModal';
 
 const createRasterMapStyle = (
   sourceId: string,
@@ -169,7 +165,9 @@ const OPEN_TOPO_STYLE = createRasterMapStyle(
 const SATELLITE_STYLE = createRasterMapStyle(
   'satellite',
   'satellite-basemap',
-  ['https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+  [
+    'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  ],
   19
 );
 
@@ -247,6 +245,8 @@ interface MapScreenProps {
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
   showFullscreenToggle?: boolean;
+  isMovingBearingEnabled?: boolean;
+  onMovingBearingChange?: (enabled: boolean) => void;
 }
 
 interface RouteStep {
@@ -304,16 +304,6 @@ const isTileEndpointAvailable = async (url: string) => {
 const isMapLayerKey = (value: string): value is MapLayerKey =>
   MAP_LAYER_KEYS.includes(value as MapLayerKey);
 
-const getStepInstruction = (step: RouteStep) => {
-  if (step.instruction) return step.instruction;
-  const modifier = step.modifier?.toLowerCase();
-  if (modifier === 'left') return 'Turn left';
-  if (modifier === 'right') return 'Turn right';
-  if (modifier === 'uturn') return 'Make a U-turn';
-  if (modifier === 'straight') return 'Go straight';
-  return 'Proceed';
-};
-
 const MapScreen = memo(function MapScreen({
   onMapPress,
   onMapRelease,
@@ -322,13 +312,15 @@ const MapScreen = memo(function MapScreen({
   onToggleFullscreen,
   isFullscreen,
   showFullscreenToggle = true,
+  isMovingBearingEnabled: isMovingBearingEnabledProp,
+  onMovingBearingChange,
 }: MapScreenProps) {
   const [initialCenter, setInitialCenter] = useState<[number, number] | null>(null);
   const [userLocation, setUserLocation] = useState<LocationCoords | null>(null);
   const [, setUserAddress] = useState<string>('Getting location...');
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
-  const [selectedLayer, setSelectedLayer] = useState<MapLayerKey>('standard');
+  const [selectedLayer, setSelectedLayer] = useState<MapLayerKey>('osm');
   const [layerAvailability, setLayerAvailability] = useState<Record<MapLayerKey, boolean>>(
     DEFAULT_LAYER_AVAILABILITY
   );
@@ -340,9 +332,13 @@ const MapScreen = memo(function MapScreen({
   const clearRoute = useRouteStore((state) => state.clearRoute);
   const [routeVersion, setRouteVersion] = useState<number>(0);
   const [isFollowingUser, setIsFollowingUser] = useState<boolean>(true);
-  const [isMovingBearingEnabled, setIsMovingBearingEnabled] = useState<boolean>(false);
+  const [isMovingBearingEnabledLocal, setIsMovingBearingEnabledLocal] = useState<boolean>(false);
+  const isMovingBearingEnabled = isMovingBearingEnabledProp ?? isMovingBearingEnabledLocal;
+  const isMovingBearingActive = isMovingBearingEnabled && isFollowingUser && hasLocationPermission;
   const [arrivalAlertIncidentId, setArrivalAlertIncidentId] = useState<Incident['id'] | null>(null);
   const [nextStepIndex, setNextStepIndex] = useState<number>(0);
+  const cameraRef = useRef<CameraRef | null>(null);
+  const lastMovingBearingCameraUpdateMsRef = useRef<number>(0);
 
   // Fetch user's current address using OSM Nominatim
   const fetchUserAddress = useCallback(async (latitude: number, longitude: number) => {
@@ -529,14 +525,7 @@ const MapScreen = memo(function MapScreen({
       setNextStepIndex(0);
       setRouteVersion((prev) => prev + 1);
     }
-  }, [
-    incident?.id,
-    normalizedIncident,
-    userLocation,
-    fetchRoute,
-    clearRoute,
-    isFullscreen,
-  ]);
+  }, [incident?.id, normalizedIncident, userLocation, fetchRoute, clearRoute, isFullscreen]);
 
   // Handle user location updates
   const handleCameraUserLocationChange = useCallback(
@@ -546,9 +535,24 @@ const MapScreen = memo(function MapScreen({
 
         setUserLocation({ latitude, longitude });
         fetchUserAddress(latitude, longitude);
+
+        if (isMovingBearingActive) {
+          const now = Date.now();
+          if (now - lastMovingBearingCameraUpdateMsRef.current >= 250) {
+            lastMovingBearingCameraUpdateMsRef.current = now;
+            const heading =
+              typeof location.coords.heading === 'number' ? location.coords.heading : undefined;
+
+            cameraRef.current?.setCamera({
+              centerCoordinate: [longitude, latitude],
+              heading,
+              animationDuration: 250,
+            });
+          }
+        }
       }
     },
-    [fetchUserAddress]
+    [fetchUserAddress, isMovingBearingActive]
   );
 
   useEffect(() => {
@@ -565,8 +569,6 @@ const MapScreen = memo(function MapScreen({
     const distance = distanceMeters([userLocation.longitude, userLocation.latitude], step.location);
 
     if (distance <= 30) {
-      const text = getStepInstruction(step);
-      Speech.speak(text);
       setNextStepIndex((prev) => prev + 1);
     }
   }, [incidentDistanceMeters, userLocation, routeSteps, nextStepIndex]);
@@ -579,8 +581,6 @@ const MapScreen = memo(function MapScreen({
     if (arrivalAlertIncidentId === incident.id) {
       return;
     }
-
-    Speech.stop();
     Vibration.cancel();
     Vibration.vibrate(ARRIVAL_VIBRATION_PATTERN, false);
     setArrivalAlertIncidentId(incident.id);
@@ -590,19 +590,47 @@ const MapScreen = memo(function MapScreen({
     setIsFollowingUser((prev) => !prev);
   }, []);
 
-  const handleToggleMovingBearing = useCallback(() => {
-    setIsMovingBearingEnabled((prev) => {
-      const next = !prev;
-      if (next) {
-        setIsFollowingUser(true);
-      }
-      return next;
+  const recenterToUser = useCallback(() => {
+    if (!userLocation) return;
+    cameraRef.current?.setCamera({
+      centerCoordinate: [userLocation.longitude, userLocation.latitude],
+      animationDuration: 450,
     });
-  }, []);
+  }, [userLocation]);
+
+  const handleToggleMovingBearing = useCallback(() => {
+    if (!hasLocationPermission) {
+      setPermissionMessage('Location permission is required to use heading mode.');
+      return;
+    }
+
+    if (isMovingBearingEnabled && !isFollowingUser) {
+      setIsFollowingUser(true);
+      recenterToUser();
+      return;
+    }
+
+    const next = !isMovingBearingEnabled;
+    if (next) {
+      setIsFollowingUser(true);
+      recenterToUser();
+    }
+
+    if (onMovingBearingChange) {
+      onMovingBearingChange(next);
+    } else {
+      setIsMovingBearingEnabledLocal(next);
+    }
+  }, [
+    hasLocationPermission,
+    isMovingBearingEnabled,
+    isFollowingUser,
+    onMovingBearingChange,
+    recenterToUser,
+  ]);
 
   const renderMode = 'native';
   const androidRenderMode = undefined;
-  const isMovingBearingActive = isMovingBearingEnabled && isFollowingUser && hasLocationPermission;
 
   // Route line color based on theme
   const routeColor = isDarkMode ? '#60a5fa' : '#3b82f6';
@@ -619,7 +647,13 @@ const MapScreen = memo(function MapScreen({
         onPress={onMapPress}
         onLongPress={onMapRelease}
         onRegionWillChange={(feature) => {
-          if (feature?.properties?.isUserInteraction) {
+          const rawIsUserInteraction = (feature as any)?.properties?.isUserInteraction;
+          const isUserInteraction =
+            rawIsUserInteraction === true ||
+            rawIsUserInteraction === 'true' ||
+            rawIsUserInteraction === 1;
+
+          if (isUserInteraction) {
             setIsFollowingUser(false);
           }
         }}
@@ -630,6 +664,7 @@ const MapScreen = memo(function MapScreen({
         zoomEnabled={true}
         scrollEnabled={true}>
         <Camera
+          ref={cameraRef}
           defaultSettings={{
             centerCoordinate: initialCenter ?? [124.02982096568188, 12.706220102613308],
             zoomLevel: 16,
@@ -707,13 +742,14 @@ const MapScreen = memo(function MapScreen({
         </View>
       )} */}
 
-      {permissionMessage && (
-        <View style={styles.permissionError}>
-          <Text style={styles.permissionErrorText}>{permissionMessage}</Text>
-        </View>
-      )}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+        {permissionMessage && (
+          <View style={styles.permissionError}>
+            <Text style={styles.permissionErrorText}>{permissionMessage}</Text>
+          </View>
+        )}
 
-      {isMovingBearingActive && (
+        {/* {isMovingBearingActive && (
         <View pointerEvents="none" style={styles.bearingPointerContainer}>
           <View style={[styles.bearingPointerBadge, isDarkMode && styles.bearingPointerBadgeDark]}>
             <View style={styles.bearingPointerIcon}>
@@ -721,80 +757,78 @@ const MapScreen = memo(function MapScreen({
             </View>
           </View>
         </View>
-      )}
+      )} */}
 
-      <TouchableOpacity
-        style={[
-          styles.bearingButton,
-          isDarkMode && styles.bearingButtonDark,
-          isMovingBearingEnabled && styles.bearingButtonActive,
-        ]}
-        activeOpacity={0.9}
-        onPress={handleToggleMovingBearing}>
-        <View
-          style={[
-            styles.bearingButtonIconWrap,
-            isMovingBearingEnabled && styles.bearingButtonIconWrapActive,
-          ]}>
-          <View style={styles.bearingButtonIcon}>
-            <Icon name="send" size={16} color="#FFFFFF" />
-          </View>
-        </View>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[
-          styles.tilePickerButton,
-          isDarkMode && styles.tilePickerButtonDark,
-        ]}
-        activeOpacity={0.9}
-        onPress={() => setShowTileSelector(true)}>
-        <View style={styles.tilePickerIconWrap}>
-          <Icon name="layers" size={18} color="#fff" />
-        </View>
-        <View style={styles.tilePickerCopy}>
-          <Text style={[styles.tilePickerLabel, isDarkMode && styles.tilePickerLabelDark]}>
-            Map Tiles
-          </Text>
-          <Text style={[styles.tilePickerValue, isDarkMode && styles.tilePickerValueDark]}>
-            {selectedLayerOption.label}
-          </Text>
-        </View>
-      </TouchableOpacity>
-
-      {/* Follow User Toggle */}
-      <TouchableOpacity
-        style={[
-          styles.followButton,
-          isDarkMode && styles.followButtonDark,
-          !isFollowingUser && styles.followButtonInactive,
-        ]}
-        onPress={handleToggleFollow}>
-        <Icon name="my-location" size={20} color="#fff" />
-      </TouchableOpacity>
-
-      {/* Fullscreen Toggle Button */}
-      {onToggleFullscreen && showFullscreenToggle && (
         <TouchableOpacity
-          style={[styles.fullscreenButton, isDarkMode && styles.fullscreenButtonDark]}
-          onPress={onToggleFullscreen}>
-          <Icon
-            name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'}
-            size={20}
-            color={isDarkMode ? '#fff' : '#333'}
-          />
+          style={[
+            styles.bearingButton,
+            isDarkMode && styles.bearingButtonDark,
+            isMovingBearingEnabled && styles.bearingButtonActive,
+          ]}
+          activeOpacity={0.9}
+          onPress={handleToggleMovingBearing}>
+          <View
+            style={[
+              styles.bearingButtonIconWrap,
+              isMovingBearingEnabled && styles.bearingButtonIconWrapActive,
+            ]}>
+            <View style={styles.bearingButtonIcon}>
+              <Icon name="send" size={16} color="#FFFFFF" />
+            </View>
+          </View>
         </TouchableOpacity>
-      )}
 
-      <MapTileSelectorModal
-        visible={showTileSelector}
-        selectedLayer={selectedLayer}
-        options={MAP_LAYER_OPTIONS}
-        isDarkMode={isDarkMode}
-        layerAvailability={layerAvailability}
-        onClose={() => setShowTileSelector(false)}
-        onSelectLayer={setSelectedLayer}
-      />
+        <TouchableOpacity
+          style={[styles.tilePickerButton, isDarkMode && styles.tilePickerButtonDark]}
+          activeOpacity={0.9}
+          onPress={() => setShowTileSelector(true)}>
+          <View style={styles.tilePickerIconWrap}>
+            <Icon name="layers" size={18} color="#fff" />
+          </View>
+          <View style={styles.tilePickerCopy}>
+            <Text style={[styles.tilePickerLabel, isDarkMode && styles.tilePickerLabelDark]}>
+              Map Tiles
+            </Text>
+            <Text style={[styles.tilePickerValue, isDarkMode && styles.tilePickerValueDark]}>
+              {selectedLayerOption.label}
+            </Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Follow User Toggle */}
+        <TouchableOpacity
+          style={[
+            styles.followButton,
+            isDarkMode && styles.followButtonDark,
+            !isFollowingUser && styles.followButtonInactive,
+          ]}
+          onPress={handleToggleFollow}>
+          <Icon name="my-location" size={20} color="#fff" />
+        </TouchableOpacity>
+
+        {/* Fullscreen Toggle Button */}
+        {onToggleFullscreen && showFullscreenToggle && (
+          <TouchableOpacity
+            style={[styles.fullscreenButton, isDarkMode && styles.fullscreenButtonDark]}
+            onPress={onToggleFullscreen}>
+            <Icon
+              name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'}
+              size={20}
+              color={isDarkMode ? '#fff' : '#333'}
+            />
+          </TouchableOpacity>
+        )}
+
+        <MapTileSelectorModal
+          visible={showTileSelector}
+          selectedLayer={selectedLayer}
+          options={MAP_LAYER_OPTIONS}
+          isDarkMode={isDarkMode}
+          layerAvailability={layerAvailability}
+          onClose={() => setShowTileSelector(false)}
+          onSelectLayer={setSelectedLayer}
+        />
+      </View>
     </>
   );
 });

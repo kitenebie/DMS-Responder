@@ -974,7 +974,8 @@ const AppContent = () => {
   };
   const isStatusCompleted = state.currentStatus === 'Completed';
   const mapShouldBeFullscreen = state.isMapFullscreen;
-  const portraitMapHeight = Math.min(Math.max(screenHeight * 0.34, 280), 360);
+  const portraitMapHeight = Math.min(Math.max(screenHeight * 0.34, 480), 480);
+  const [isMovingBearingEnabled, setIsMovingBearingEnabled] = useState(false);
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -1105,6 +1106,8 @@ const AppContent = () => {
             onToggleFullscreen={handleToggleMapFullscreen}
             onRestoreSize={handleRestoreMapSize}
             showFullscreenToggle={!isStatusCompleted}
+            isMovingBearingEnabled={isMovingBearingEnabled}
+            onMovingBearingChange={setIsMovingBearingEnabled}
           />
         </View>
       );
@@ -1131,39 +1134,6 @@ const AppContent = () => {
                 styles.heroCard,
                 { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
               ]}>
-              <View style={styles.heroHeaderBlock}>
-                <View style={styles.heroCopy}>
-                  <Text style={[styles.heroEyebrow, { color: DEFAULT_CONFIG.primary_color }]}>
-                    {state.activeIncident ? 'Live Response' : 'Responder Standby'}
-                  </Text>
-                  <Text style={[styles.heroTitle, { color: theme.text }]}>
-                    {state.activeIncident ? state.activeIncident.type : 'Waiting for incoming reports'}
-                  </Text>
-                  <Text style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
-                    {state.activeIncident
-                      ? state.activeIncident.location || 'Location details are not available.'
-                      : 'Your map, location tracking, and history tools stay ready while no dispatch is assigned.'}
-                  </Text>
-                </View>
-
-                <View
-                  style={[
-                    styles.heroStatusPill,
-                    {
-                      backgroundColor: state.activeIncident
-                        ? STATUS_COLORS[state.currentStatus] || STATUS_COLORS.Pending
-                        : theme.surfaceAlt,
-                    },
-                  ]}>
-                  <Text
-                    style={[
-                      styles.heroStatusPillText,
-                      !state.activeIncident && { color: theme.text },
-                    ]}>
-                    {state.activeIncident ? state.currentStatus : 'Available'}
-                  </Text>
-                </View>
-              </View>
 
               <View style={styles.heroMetaRow}>
                 <View
@@ -1202,6 +1172,8 @@ const AppContent = () => {
                 showFullscreenToggle={!isStatusCompleted}
                 mapHeight={portraitMapHeight}
                 containerStyle={styles.heroMap}
+                isMovingBearingEnabled={isMovingBearingEnabled}
+                onMovingBearingChange={setIsMovingBearingEnabled}
               />
 
               <View style={styles.heroMetricsRow}>
@@ -1276,7 +1248,6 @@ const AppContent = () => {
                 <ActionBar
                   onOpenChat={handleOpenChat}
                   onOpenHistory={handleOpenHistory}
-                  onOpenReport={handleOpenReport}
                 />
               </>
             ) : (
