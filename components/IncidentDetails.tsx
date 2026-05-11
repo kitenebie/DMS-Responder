@@ -46,11 +46,6 @@ export const IncidentDetails: React.FC<IncidentDetailsProps> = ({
             {incident.timeReported ? formatTime(incident.timeReported) : 'N/A'}
           </Text>
         </View>
-
-        <View style={[styles.gridItem, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Assigned Responder</Text>
-          <Text style={[styles.value, { color: theme.text }]}>{responderName}</Text>
-        </View>
       </View>
     </View>
   );

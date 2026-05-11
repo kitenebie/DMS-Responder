@@ -6,6 +6,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 export interface LocationCoords {
   latitude: number;
   longitude: number;
+  heading?: number;
 }
 
 interface LocationState {
@@ -174,23 +175,36 @@ class LocationService {
 
       const locationResult = await Location.getCurrentPositionAsync(options);
 
-      const { latitude, longitude, accuracy } = locationResult.coords;
+      const { latitude, longitude, accuracy, heading } = locationResult.coords;
+
+      console.log(`[Location] Raw heading value: ${heading}, type: ${typeof heading}`);
 
       // Validate coordinates
       if (!this.isValidCoordinate(latitude, longitude)) {
         throw new Error(`Invalid coordinates: ${latitude}, ${longitude}`);
       }
 
+      // Normalize heading to 0-360 range
+      let normalizedHeading: number | undefined = undefined;
+      if (heading !== null && heading !== undefined && !isNaN(heading)) {
+        normalizedHeading = ((heading % 360) + 360) % 360;
+        console.log(`[Location] Normalized heading: ${normalizedHeading}`);
+      }
+
       // Update cache
       this.locationState = {
-        current: { latitude, longitude },
+        current: { 
+          latitude, 
+          longitude,
+          heading: normalizedHeading,
+        },
         lastUpdated: Date.now(),
         accuracy: accuracy ?? undefined,
         permissionStatus: this.locationState.permissionStatus,
       };
 
-      console.log(`Location updated: ${latitude}, ${longitude} (accuracy: ${accuracy}m)`);
-      return { latitude, longitude };
+      console.log(`Location updated: ${latitude}, ${longitude} (accuracy: ${accuracy}m, heading: ${normalizedHeading ?? 'N/A'}°)`);
+      return { latitude, longitude, heading: normalizedHeading };
     } catch (error) {
       console.log(`Location fetch failed with accuracy ${options.accuracy}:`, error);
       return null;
@@ -220,7 +234,7 @@ class LocationService {
           distanceInterval: 10, // Or when moved 10 meters
         },
         (location) => {
-          const { latitude, longitude, accuracy } = location.coords;
+          const { latitude, longitude, accuracy, heading } = location.coords;
 
           // Validate coordinates
           if (!this.isValidCoordinate(latitude, longitude)) {
@@ -230,13 +244,17 @@ class LocationService {
 
           // Update cached location
           this.locationState = {
-            current: { latitude, longitude },
+            current: { 
+              latitude, 
+              longitude,
+              heading: heading !== null && heading !== undefined ? heading : undefined,
+            },
             lastUpdated: Date.now(),
             accuracy: accuracy ?? undefined,
             permissionStatus: this.locationState.permissionStatus,
           };
 
-          callback({ latitude, longitude });
+          callback({ latitude, longitude, heading: heading !== null && heading !== undefined ? heading : undefined });
         }
       );
 
@@ -487,23 +505,42 @@ class LocationService {
     }
   }
 
-  // Send location to server
-  private async sendLocationToServer(location: LocationCoords): Promise<void> {
+  // Send location to server with optional heading override
+  private async sendLocationToServer(location: LocationCoords, headingOverride?: number): Promise<void> {
     if (!this.locationApi) {
       console.log('[LocationTracking] Location API not initialized');
       return;
     }
 
     try {
-      const response = await this.locationApi.post('/responder/location', {
+      const payload: any = {
         lat: location.latitude,
         lng: location.longitude,
-      });
+      };
+
+      // Use heading override if provided, otherwise use location.heading
+      const heading = headingOverride !== undefined ? headingOverride : location.heading;
+
+      // Add heading/degree if available (including 0)
+      if (typeof heading === 'number' && !isNaN(heading)) {
+        payload.degree = heading;
+        console.log(`[LocationTracking] Sending degree: ${heading}`);
+      } else {
+        console.log(`[LocationTracking] No heading available (value: ${heading})`);
+      }
+
+      console.log(`[LocationTracking] Payload:`, JSON.stringify(payload));
+      const response = await this.locationApi.post('/responder/location', payload);
       console.log(`[LocationTracking] Server response: ${response.status} - ${response.statusText}`);
     } catch (error: any) {
       console.log('[LocationTracking] Server error:', error.response?.data || error.message);
       throw error;
     }
+  }
+
+  // Send location with heading to server (public method for map component)
+  async sendLocationWithHeading(location: LocationCoords, heading: number): Promise<void> {
+    return this.sendLocationToServer(location, heading);
   }
 
   // Cleanup method to be called on app shutdown

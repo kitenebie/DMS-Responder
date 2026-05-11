@@ -85,7 +85,7 @@ export const updateReportStatus = async (
     }
     if (payload?.reportId !== undefined && payload?.reportId !== null) {
       const match = String(payload.reportId).match(/\d+/);
-      body.reportId = match ? Number(match[0]) : payload.reportId;
+      body.report_id = match ? Number(match[0]) : payload.reportId;
     }
     await api.post(`/responder/report/update/status`, body);
     console.log('Report status updated successfully');

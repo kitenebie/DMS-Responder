@@ -19,6 +19,8 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   const theme = getTheme(isDarkMode);
   const normalizedId =
     typeof incidentId === 'number' ? String(incidentId) : incidentId?.trim() ?? '';
+  
+  console.log('ReportScreen mounted with incidentId:', incidentId, 'normalizedId:', normalizedId);
 
   return (
     <SafeAreaView

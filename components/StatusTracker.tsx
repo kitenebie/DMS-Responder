@@ -130,10 +130,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
   const handleUpdateStatus = async (status: IncidentStatus) => {
     // If clicking Completed, show report form instead of confirmation
     if (status === 'Completed') {
-      if (onOpenReportForm) {
-        onOpenReportForm();
-        return;
-      }
+      console.log('Completed clicked, showing report form modal');
       setReportFormVisible(true);
       return;
     }
@@ -155,7 +152,8 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
         reportId: normalizedIncidentId,
       });
       if (success) {
-        // Notify parent component
+        console.log('Status updated successfully, calling onUpdateStatus with:', pendingStatus);
+        // Notify parent component FIRST
         onUpdateStatus(pendingStatus);
         // Refresh status from API
         await refreshStatus();
@@ -188,6 +186,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
     try {
       // Submit the report form to API
       await submitReportForm(reportFormData, photoUri, normalizedIncidentId);
+      console.log('Report form submitted, setting pendingStatus to Completed');
 
       setReportFormVisible(false);
       setPendingStatus('Completed');
@@ -281,6 +280,7 @@ export const StatusTracker: React.FC<StatusTrackerProps> = ({
 
   useEffect(() => {
     if (reportStatus) {
+      console.log('Current Status in StatusTracker:', currentStatus);
       onUpdateStatus(currentStatus);
     }
   }, [reportStatus, currentStatus, onUpdateStatus]);

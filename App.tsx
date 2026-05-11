@@ -16,6 +16,7 @@ import {
   AppState as RNAppState,
   Linking,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ThemeProvider } from './components/ThemeContext';
@@ -40,6 +41,9 @@ import {
   addChatMessage,
   DEFAULT_CONFIG,
   STATUS_COLORS,
+  updateReportStatus,
+  fetchReportStatus,
+  getCurrentStatus,
 } from './src/mockData';
 import {
   AppState as ResponderAppState,
@@ -48,7 +52,7 @@ import {
   ChatMessage,
 } from './src/types';
 import { RootStackParamList } from './src/navigation/types';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Background from 'Background';
 import * as Location from 'expo-location';
 import {
@@ -102,6 +106,7 @@ const AppContent = () => {
   const [incomingIncident, setIncomingIncident] = useState<Incident | null>(null);
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [trackerCurrentStatus, setTrackerCurrentStatus] = useState<IncidentStatus>('Active');
   const overlayPermissionPromptShownRef = useRef(false);
   const locationPermissionPromptShownRef = useRef(false);
   const stateRef = useRef(state);
@@ -529,7 +534,7 @@ const AppContent = () => {
       }
       stopLocationUpdates();
     };
-  }, [isLoggedIn, state.currentStatus, state.activeIncident?.id]);
+  }, [isLoggedIn, trackerCurrentStatus, state.activeIncident?.id]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
@@ -565,6 +570,40 @@ const AppContent = () => {
 
     void FirebaseNotificationService.syncCurrentToken();
   }, [isLoggedIn]);
+
+  // Load status from localStorage on mount
+  useEffect(() => {
+    const loadStatusFromStorage = async () => {
+      try {
+        const savedStatus = await AsyncStorage.getItem('currentReportStatus');
+        if (savedStatus && state.activeIncident) {
+          setTrackerCurrentStatus(savedStatus as IncidentStatus);
+        }
+      } catch (error) {
+        console.error('Error loading status from storage:', error);
+      }
+    };
+
+    if (state.activeIncident) {
+      loadStatusFromStorage();
+    }
+  }, [state.activeIncident?.id]);
+
+  // Save status to localStorage whenever it changes
+  useEffect(() => {
+    const saveStatusToStorage = async () => {
+      try {
+        console.log('Saving status to localStorage:', trackerCurrentStatus);
+        await AsyncStorage.setItem('currentReportStatus', trackerCurrentStatus);
+      } catch (error) {
+        console.error('Error saving status to storage:', error);
+      }
+    };
+
+    if (state.activeIncident) {
+      saveStatusToStorage();
+    }
+  }, [trackerCurrentStatus, state.activeIncident?.id]);
 
   // Auto-login on app start
   useEffect(() => {
@@ -621,14 +660,15 @@ const AppContent = () => {
   }, []);
 
   const handleUpdateStatus = useCallback((newStatus: IncidentStatus) => {
+    console.log('handleUpdateStatus called with:', newStatus);
+    setTrackerCurrentStatus(newStatus);
     if (newStatus === 'Cleared') {
       resetIncidentState();
       return;
     }
-    setState((prev) => ({
-      ...prev,
-      currentStatus: newStatus,
-    }));
+    if (newStatus === 'Completed') {
+      navigate('Report');
+    }
   }, [resetIncidentState]);
 
   const handleToggleMapFullscreen = useCallback(() => {
@@ -770,14 +810,14 @@ const AppContent = () => {
       animationType="fade"
       onRequestClose={cancelLogout}>
       <TouchableOpacity style={styles.modalOverlay} onPress={cancelLogout}>
-        <TouchableOpacity style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
+        <TouchableOpacity style={[styles.modalContent, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={(e) => e.stopPropagation()}>
           <Text style={[styles.modalTitle, { color: theme.text }]}>Logout</Text>
           <Text style={[styles.modalMessage, { color: theme.textSecondary }]}>
             Are you sure you want to logout?
           </Text>
           <View style={styles.modalButtons}>
-            <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={cancelLogout}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+            <TouchableOpacity style={[styles.modalButton, styles.cancelButton, { backgroundColor: theme.surfaceAlt }]} onPress={cancelLogout}>
+              <Text style={[styles.cancelButtonText, { color: theme.text }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.modalButton, styles.confirmButton]}
@@ -972,10 +1012,61 @@ const AppContent = () => {
     text: isDarkMode ? '#F8FAFC' : '#0F172A',
     textSecondary: isDarkMode ? '#94A3B8' : '#475569',
   };
-  const isStatusCompleted = state.currentStatus === 'Completed';
+  const isStatusCompleted = trackerCurrentStatus === 'Completed';
   const mapShouldBeFullscreen = state.isMapFullscreen;
   const portraitMapHeight = Math.min(Math.max(screenHeight * 0.34, 480), 480);
   const [isMovingBearingEnabled, setIsMovingBearingEnabled] = useState(false);
+
+  const getNextStatusButton = useCallback(() => {
+    const currentStatus = trackerCurrentStatus;
+    console.log('getNextStatusButton - currentStatus:', currentStatus);
+    if (currentStatus === 'Active' || currentStatus === 'Ongoing') {
+      return { label: 'Arrived', status: 'Arrived' as IncidentStatus, color: '#F59E0B', icon: 'location' };
+    }
+    if (currentStatus === 'Arrived') {
+      return { label: 'Completed', status: 'Completed' as IncidentStatus, color: '#10B981', icon: 'check' };
+    }
+    if (currentStatus === 'Completed') {
+      return { label: 'Cleared', status: 'Cleared' as IncidentStatus, color: '#6B7280', icon: 'cleared-report' };
+    }
+    return null;
+  }, [trackerCurrentStatus]);
+
+  const handleNextStatus = useCallback(async () => {
+    const nextStatus = getNextStatusButton();
+    if (nextStatus) {
+      try {
+        const normalizedIncidentId = state.activeIncident?.id;
+        console.log('handleNextStatus - nextStatus:', nextStatus);
+        const success = await updateReportStatus({
+          status: nextStatus.status,
+          reportId: normalizedIncidentId,
+        });
+        console.log('updateReportStatus success:', success);
+        if (success) {
+          // If status is Completed, navigate to Report page
+          if (nextStatus.status === 'Completed') {
+            console.log('Status is Completed, navigating to Report page');
+            navigate('Report');
+            return;
+          }
+          // Otherwise update the tracker status
+          const statusData = await fetchReportStatus(normalizedIncidentId);
+          if (statusData) {
+            const currentStatus = getCurrentStatus(statusData);
+            console.log('Fetched currentStatus:', currentStatus);
+            handleUpdateStatus(currentStatus);
+            await AsyncStorage.setItem('currentReportStatus', currentStatus);
+          }
+        }
+      } catch (error) {
+        console.error('Error updating status:', error);
+        Alert.alert('Error', 'Failed to update status. Please try again.');
+      }
+    }
+  }, [getNextStatusButton, handleUpdateStatus, state.activeIncident?.id]);
+
+  const nextStatusButton = getNextStatusButton();
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -1008,7 +1099,7 @@ const AppContent = () => {
 
   const renderStatusBadge = () => {
     if (state.activeIncident) {
-      const badgeStatus = state.currentStatus;
+      const badgeStatus = trackerCurrentStatus;
       const color = STATUS_COLORS[badgeStatus] || STATUS_COLORS.Pending;
       return (
         <View style={[styles.statusBadge, { backgroundColor: color }]}>
@@ -1109,6 +1200,24 @@ const AppContent = () => {
             isMovingBearingEnabled={isMovingBearingEnabled}
             onMovingBearingChange={setIsMovingBearingEnabled}
           />
+          {/* Action Buttons - Show in fullscreen map */}
+          {state.activeIncident && nextStatusButton && (
+            <View style={styles.fullscreenActionButtons} key={`fullscreen-buttons-${nextStatusButton.label}`}>
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: nextStatusButton.color }]}
+                onPress={handleNextStatus}>
+                <Icon name={nextStatusButton.icon as any} size={20} color="#fff" />
+                <Text style={styles.actionButtonText}>{nextStatusButton.label}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                onPress={handleOpenChat}>
+                <Icon name="chat" size={20} color="#fff" />
+                <Text style={styles.actionButtonText}>Chats</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       );
     }
@@ -1176,10 +1285,29 @@ const AppContent = () => {
                 onMovingBearingChange={setIsMovingBearingEnabled}
               />
 
+              {/* Action Buttons - Show only when there's an active incident */}
+              {state.activeIncident && nextStatusButton && (
+                <View style={styles.actionButtonsContainer} key={`buttons-${nextStatusButton.label}`}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: nextStatusButton.color }]}
+                    onPress={handleNextStatus}>
+                    <Icon name={nextStatusButton.icon as any} size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>{nextStatusButton.label}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                    onPress={handleOpenChat}>
+                    <Icon name="chat" size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>Chats</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <View style={styles.heroMetricsRow}>
                 {renderHeroMetric(
                   'Status',
-                  state.activeIncident ? state.currentStatus : 'Available'
+                  state.activeIncident ? trackerCurrentStatus : 'Available'
                 )}
                 {renderHeroMetric('Responder', userName)}
                 {renderHeroMetric(
@@ -1193,7 +1321,7 @@ const AppContent = () => {
 
             {state.activeIncident ? (
               <>
-                {state.currentStatus !== 'Completed' && (
+                {trackerCurrentStatus !== 'Completed' && (
                   <>
                     {renderSectionHeader(
                       'Fast Access',
@@ -1205,7 +1333,7 @@ const AppContent = () => {
                       onOpenHistory={handleOpenHistory}
                       onOpenReport={handleOpenReport}
                       onOpenStatus={handleScrollToStatus}
-                      currentStatus={state.currentStatus}
+                      currentStatus={trackerCurrentStatus}
                       isDarkMode={isDarkMode}
                       onUpdateStatus={handleUpdateStatus}
                     />
@@ -1392,6 +1520,7 @@ const styles = StyleSheet.create({
   },
   fullscreenContainer: {
     flex: 1,
+    position: 'relative',
   },
   header: {
     flexDirection: 'row',
@@ -1675,5 +1804,37 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '800',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  actionButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fullscreenActionButtons: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 88,
+    flexDirection: 'row',
+    gap: 12,
   },
 });
