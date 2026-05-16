@@ -108,6 +108,53 @@ const distanceMeters = (a: [number, number], b: [number, number]) => {
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
+/**
+ * Calculate the minimum perpendicular distance (in meters) from a point
+ * to a polyline (array of [lng, lat] coordinates).
+ * Used to detect if the responder has deviated from the route.
+ */
+const distanceToPolyline = (
+  point: [number, number],
+  polyline: [number, number][]
+): number => {
+  if (polyline.length === 0) return Infinity;
+  if (polyline.length === 1) return distanceMeters(point, polyline[0]);
+
+  let minDist = Infinity;
+
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const A = polyline[i];
+    const B = polyline[i + 1];
+
+    // Project point P onto segment AB, get closest point on segment
+    const ax = A[0], ay = A[1];
+    const bx = B[0], by = B[1];
+    const px = point[0], py = point[1];
+
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+
+    let t = 0;
+    if (lenSq > 0) {
+      t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+    }
+
+    const closestX = ax + t * dx;
+    const closestY = ay + t * dy;
+
+    const d = distanceMeters(point, [closestX, closestY]);
+    if (d < minDist) minDist = d;
+  }
+
+  return minDist;
+};
+
+// How far (meters) off-route before triggering a reroute
+const OFF_ROUTE_THRESHOLD_M = 35;
+// How many consecutive off-route checks before actually rerouting (avoids GPS jitter false positives)
+const OFF_ROUTE_CONSECUTIVE_CHECKS = 3;
+
 const MapScreen = memo(function MapScreen({
   onMapPress,
   onMapRelease,
@@ -135,8 +182,15 @@ const MapScreen = memo(function MapScreen({
   const isMovingBearingActive = isMovingBearingEnabled && isFollowingUser && hasLocationPermission;
   const [arrivalAlertIncidentId, setArrivalAlertIncidentId] = useState<Incident['id'] | null>(null);
   const [nextStepIndex, setNextStepIndex] = useState<number>(0);
+  const [isRerouting, setIsRerouting] = useState(false);
   const cameraRef = useRef<CameraRef | null>(null);
   const lastMovingBearingCameraUpdateMsRef = useRef<number>(0);
+  // Tracks consecutive off-route GPS checks to avoid false positives from jitter
+  const offRouteCountRef = useRef<number>(0);
+  // Stores the destination coordinates for rerouting without incident dependency
+  const destCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  // Prevents simultaneous reroute fetches
+  const isReroutingRef = useRef(false);
 
   // Fetch user's current address using OSM Nominatim
   const fetchUserAddress = useCallback(async (latitude: number, longitude: number) => {
@@ -225,11 +279,16 @@ const MapScreen = memo(function MapScreen({
 
 
 
-  // Update route when incident location or user location changes
+  // Fetch initial route ONLY when incident changes — NOT on every userLocation update.
+  // Re-routing on deviation is handled separately by the off-route detector below.
   useEffect(() => {
     if (incident?.id && normalizedIncident && userLocation) {
       const destLat = normalizedIncident.lat;
       const destLng = normalizedIncident.lng;
+
+      // Store destination for later rerouting without re-subscribing to incident
+      destCoordsRef.current = { lat: destLat, lng: destLng };
+      offRouteCountRef.current = 0;
 
       fetchRoute({
         userLat: userLocation.latitude,
@@ -240,11 +299,15 @@ const MapScreen = memo(function MapScreen({
       setRouteVersion((prev) => prev + 1);
       setNextStepIndex(0);
     } else {
+      destCoordsRef.current = null;
+      offRouteCountRef.current = 0;
       clearRoute();
       setNextStepIndex(0);
       setRouteVersion((prev) => prev + 1);
     }
-  }, [incident?.id, normalizedIncident, userLocation, fetchRoute, clearRoute, isFullscreen]);
+  // Only re-fetch on incident change — not on userLocation change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incident?.id, normalizedIncident?.lat, normalizedIncident?.lng]);
 
   // Handle user location updates
   const handleCameraUserLocationChange = useCallback(
@@ -291,6 +354,59 @@ const MapScreen = memo(function MapScreen({
     [fetchUserAddress, isMovingBearingActive]
   );
 
+  // Off-route detection: checks every time userLocation updates.
+  // If the responder is more than OFF_ROUTE_THRESHOLD_M meters away from
+  // the current route polyline for OFF_ROUTE_CONSECUTIVE_CHECKS checks in a row,
+  // we trigger a reroute from their current position.
+  useEffect(() => {
+    if (!userLocation || !routeGeometry || isReroutingRef.current) return;
+    if (!destCoordsRef.current) return;
+    // Don't reroute if already arrived
+    if (incidentDistanceMeters !== null && incidentDistanceMeters <= 30) return;
+
+    const userPoint: [number, number] = [userLocation.longitude, userLocation.latitude];
+    const polyline = routeGeometry.coordinates as [number, number][];
+    const deviation = distanceToPolyline(userPoint, polyline);
+
+    if (deviation > OFF_ROUTE_THRESHOLD_M) {
+      offRouteCountRef.current += 1;
+      console.log(`[Reroute] Off-route: ${deviation.toFixed(0)}m (check ${offRouteCountRef.current}/${OFF_ROUTE_CONSECUTIVE_CHECKS})`);
+
+      if (offRouteCountRef.current >= OFF_ROUTE_CONSECUTIVE_CHECKS) {
+        offRouteCountRef.current = 0;
+        isReroutingRef.current = true;
+        setIsRerouting(true);
+
+        const dest = destCoordsRef.current;
+        console.log('[Reroute] Recalculating route from current position...');
+
+        fetchRoute({
+          userLat: userLocation.latitude,
+          userLng: userLocation.longitude,
+          destLat: dest.lat,
+          destLng: dest.lng,
+        }).then(() => {
+          isReroutingRef.current = false;
+          setIsRerouting(false);
+          setRouteVersion((prev) => prev + 1);
+          setNextStepIndex(0);
+          console.log('[Reroute] New route calculated successfully.');
+        }).catch(() => {
+          isReroutingRef.current = false;
+          setIsRerouting(false);
+          console.log('[Reroute] Reroute failed.');
+        });
+      }
+    } else {
+      // Back on route — reset counter
+      if (offRouteCountRef.current > 0) {
+        console.log('[Reroute] Back on route, resetting counter.');
+      }
+      offRouteCountRef.current = 0;
+    }
+  }, [userLocation, routeGeometry, incidentDistanceMeters, fetchRoute]);
+
+  // Advance to next step when close to current step waypoint
   useEffect(() => {
     if (incidentDistanceMeters !== null && incidentDistanceMeters <= 30) {
       return;
@@ -438,9 +554,9 @@ const MapScreen = memo(function MapScreen({
             <LineLayer
               id={routeLineId}
               style={{
-                lineColor: routeColor,
+                lineColor: isRerouting ? '#f59e0b' : routeColor,
                 lineWidth: 4,
-                lineOpacity: 0.8,
+                lineOpacity: isRerouting ? 0.5 : 0.8,
                 lineDasharray: [2, 1],
               }}
             />
@@ -482,6 +598,13 @@ const MapScreen = memo(function MapScreen({
         {permissionMessage && (
           <View style={styles.permissionError}>
             <Text style={styles.permissionErrorText}>{permissionMessage}</Text>
+          </View>
+        )}
+
+        {/* Rerouting indicator */}
+        {isRerouting && (
+          <View style={styles.reroutingBanner}>
+            <Text style={styles.reroutingText}>↺  Rerouting...</Text>
           </View>
         )}
 
@@ -953,6 +1076,26 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  reroutingBanner: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.95)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  reroutingText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });
 
