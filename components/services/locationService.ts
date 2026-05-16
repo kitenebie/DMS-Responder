@@ -230,8 +230,8 @@ class LocationService {
       const subscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.Balanced,
-          timeInterval: 10000, // Update every 10 seconds
-          distanceInterval: 10, // Or when moved 10 meters
+          timeInterval: 3000,  // Update every 3 seconds
+          distanceInterval: 5, // Or when moved 5 meters
         },
         (location) => {
           const { latitude, longitude, accuracy, heading } = location.coords;
@@ -451,7 +451,9 @@ class LocationService {
     this.locationApi = apiInstance;
   }
 
-  // Start sending location to server every 3 seconds
+  // Start real-time location tracking using watchPositionAsync.
+  // Uses GPS watch instead of polling cached location, so every real movement
+  // is immediately sent to the server without waiting for cache expiry.
   async startLocationTracking(): Promise<{ remove: () => void } | null> {
     if (!this.locationApi) {
       console.log('[LocationTracking] Location API not initialized. Call initializeLocationApi first.');
@@ -467,30 +469,80 @@ class LocationService {
     // Stop any existing tracking
     this.stopLocationTracking();
 
-    console.log('[LocationTracking] Starting location tracking (every 3 seconds)...');
+    console.log('[LocationTracking] Starting real-time GPS tracking...');
 
-    // Send initial location
+    // Send initial location immediately (force fresh GPS, not cache)
     try {
-      const location = await this.getCurrentLocation();
+      const location = await this.getCurrentLocation(true);
       await this.sendLocationToServer(location);
       console.log('[LocationTracking] Initial location sent successfully');
     } catch (error) {
       console.log('[LocationTracking] Failed to send initial location:', error);
     }
 
-    // Send location every 3 seconds
-    this.locationInterval = setInterval(async () => {
-      try {
-        const location = await this.getCurrentLocation();
-        await this.sendLocationToServer(location);
-        console.log(`[LocationTracking] Location sent: ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`);
-      } catch (error) {
-        console.log('[LocationTracking] Failed to send location:', error);
-      }
-    }, 3000);
+    // Watch for real GPS position changes and send each update to server.
+    // This replaces the old setInterval+getCachedLocation approach which
+    // kept sending the same stale cached position for up to 5 minutes.
+    let trackingSubscription: Location.LocationSubscription | null = null;
+    try {
+      trackingSubscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 3000,  // Emit at most every 3 seconds
+          distanceInterval: 5, // Or when moved at least 5 meters
+        },
+        async (locationResult) => {
+          const { latitude, longitude, accuracy, heading } = locationResult.coords;
+
+          if (!this.isValidCoordinate(latitude, longitude)) {
+            console.log('[LocationTracking] Invalid coordinates, skipping:', latitude, longitude);
+            return;
+          }
+
+          // Normalize heading
+          let normalizedHeading: number | undefined = undefined;
+          if (heading !== null && heading !== undefined && !isNaN(heading)) {
+            normalizedHeading = ((heading % 360) + 360) % 360;
+          }
+
+          const coords: LocationCoords = { latitude, longitude, heading: normalizedHeading };
+
+          // Update internal cache with fresh position
+          this.locationState = {
+            current: coords,
+            lastUpdated: Date.now(),
+            accuracy: accuracy ?? undefined,
+            permissionStatus: this.locationState.permissionStatus,
+          };
+
+          try {
+            await this.sendLocationToServer(coords);
+            console.log(`[LocationTracking] Location sent: ${latitude.toFixed(6)}, ${longitude.toFixed(6)} heading: ${normalizedHeading ?? 'N/A'}°`);
+          } catch (error) {
+            console.log('[LocationTracking] Failed to send location update:', error);
+          }
+        }
+      );
+    } catch (error) {
+      console.log('[LocationTracking] Failed to start GPS watch, falling back to interval polling:', error);
+      // Fallback: poll with forced refresh if watchPositionAsync fails
+      this.locationInterval = setInterval(async () => {
+        try {
+          const location = await this.getCurrentLocation(true); // forceRefresh = true
+          await this.sendLocationToServer(location);
+          console.log(`[LocationTracking] Fallback sent: ${location.latitude.toFixed(6)}, ${location.longitude.toFixed(6)}`);
+        } catch (err) {
+          console.log('[LocationTracking] Fallback send failed:', err);
+        }
+      }, 3000);
+    }
 
     return {
       remove: () => {
+        if (trackingSubscription) {
+          trackingSubscription.remove();
+          trackingSubscription = null;
+        }
         this.stopLocationTracking();
       },
     };
