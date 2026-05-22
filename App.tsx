@@ -34,7 +34,7 @@ import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
 import { navigationRef, navigate } from './components/lib/NavigationService';
 import { getCredentials, login, logout } from './components/lib/auth';
-import { sendLocation, stopLocationUpdates } from './components/lib/axios';
+import { stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import { MarkerSelectScreen, ASYNC_STORAGE_MARKER_KEY, type MarkerKey } from './components/MarkerSelectScreen';
 import {
@@ -373,12 +373,13 @@ const AppContent = () => {
       try {
         const location = await locationService.getCurrentLocation(true);
         if (!isMounted) return;
-        console.log('[Location] Sending location to server: lat=' + location.latitude + ', lng=' + location.longitude);
-        await sendLocation(
-          { lat: location.latitude, lng: location.longitude },
-          { repeat: false },
-          hasValidReportId ? Number(reportIdValue) : undefined
-        );
+        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude);
+        // Temporarily disabled server location updates.
+        // await sendLocation(
+        //   { lat: location.latitude, lng: location.longitude },
+        //   { repeat: false },
+        //   hasValidReportId ? Number(reportIdValue) : undefined
+        // );
         // Save location to Firebase Realtime Database (non-blocking)
         if (currentUserId) {
           void saveResponderLocation(currentUserId, location.latitude, location.longitude);
@@ -391,7 +392,7 @@ const AppContent = () => {
     };
 
     sendCurrentLocation();
-    intervalId = setInterval(sendCurrentLocation, 2800);
+    intervalId = setInterval(sendCurrentLocation, 500);
 
     return () => {
       isMounted = false;
