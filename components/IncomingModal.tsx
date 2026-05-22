@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, ActivityIndicator, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, ActivityIndicator, Animated, Vibration } from 'react-native';
 import { useAudioPlayer } from 'expo-audio';
 import { Incident } from '@/types';
 import { formatTime } from '@/utils';
@@ -49,6 +49,19 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
     }
     return () => {
       try { player.pause(); } catch {}
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    if (visible) {
+      // Vibrate continuously (wait 500ms, vibrate 1000ms, repeat)
+      const pattern = [500, 1000];
+      Vibration.vibrate(pattern, true);
+    } else {
+      Vibration.cancel();
+    }
+    return () => {
+      Vibration.cancel();
     };
   }, [visible]);
 
@@ -312,7 +325,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
         activeOpacity={1}
       >
         <Image
-          source={{ uri: incident.report_attachment }}
+          source={{ uri: incident.report_attachment || undefined }}
           style={styles.fullImage}
           resizeMode="contain"
         />

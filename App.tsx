@@ -22,6 +22,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ThemeProvider } from './components/ThemeContext';
 import { LoginForm } from './components/LoginForm';
 import { Map } from './components/Map';
+import { FullscreenMapScreen } from './components/FullscreenMapScreen';
 import { IncomingModal } from './components/IncomingModal';
 import { IncidentDetails } from './components/IncidentDetails';
 import { StatusTracker } from './components/StatusTracker';
@@ -35,6 +36,7 @@ import { navigationRef, navigate } from './components/lib/NavigationService';
 import { getCredentials, login, logout } from './components/lib/auth';
 import { sendLocation, stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
+import { MarkerSelectScreen, ASYNC_STORAGE_MARKER_KEY, type MarkerKey } from './components/MarkerSelectScreen';
 import {
   fetchIncomingIncident,
   fetchChatMessages,
@@ -56,14 +58,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Background from 'Background';
 import * as Location from 'expo-location';
 import {
-  consumePendingOverlayNavigation,
-  openOverlayPermissionSettings,
-  setOverlayBubbleVisible,
   startOverlayLocationService,
   stopOverlayLocationService,
+  isOverlayLocationServiceRunning,
 } from './components/services/OverlayLocationService';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import FirebaseNotificationService from './services/FirebaseNotificationService';
+import { saveResponderLocation } from './services/FirebaseLocationService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -81,6 +82,8 @@ const AppContent = () => {
   const [chatScreenMode, setChatScreenMode] = useState<'live' | 'history'>('live');
   const [historyChatMessages, setHistoryChatMessages] = useState<ChatMessage[]>([]);
   const [historyChatTitle, setHistoryChatTitle] = useState('Incident Chat');
+  const [currentRoute, setCurrentRoute] = useState<string | undefined>('Home');
+  const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
 
   const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
@@ -207,116 +210,6 @@ const AppContent = () => {
     [buildOverlayIncident, state.activeIncident]
   );
 
-  const consumeOverlayNavigationIfAny = useCallback(async () => {
-    if (Platform.OS !== 'android') {
-      return;
-    }
-
-    const pending = await consumePendingOverlayNavigation();
-    if (!pending?.reportId) {
-      return;
-    }
-
-    if (pending.screen === 'ReportChats') {
-      await openReportChatFromOverlay(pending.reportId);
-    }
-  }, [openReportChatFromOverlay]);
-
-  const promptForBackgroundLocationSettings = useCallback((message: string) => {
-    if (locationPermissionPromptShownRef.current) {
-      return;
-    }
-
-    locationPermissionPromptShownRef.current = true;
-    Alert.alert(
-      'Allow "All the time" Location',
-      message,
-      [
-        {
-          text: 'Not now',
-          style: 'cancel',
-          onPress: () => {
-            locationPermissionPromptShownRef.current = false;
-          },
-        },
-        {
-          text: 'Open settings',
-          onPress: () => {
-            locationPermissionPromptShownRef.current = false;
-            void Linking.openSettings();
-          },
-        },
-      ],
-      {
-        cancelable: true,
-        onDismiss: () => {
-          locationPermissionPromptShownRef.current = false;
-        },
-      }
-    );
-  }, []);
-
-  const ensureAndroidBackgroundLocationPermission = useCallback(
-    async (interactive = false): Promise<boolean> => {
-      if (Platform.OS !== 'android') {
-        return true;
-      }
-
-      let foregroundPermission = await Location.getForegroundPermissionsAsync();
-      if (foregroundPermission.status !== 'granted') {
-        if (!interactive) {
-          return false;
-        }
-
-        if (!foregroundPermission.canAskAgain) {
-          promptForBackgroundLocationSettings(
-            'Set location access to "Allow all the time" so the responder overlay can keep updating your position even while the app is minimized.'
-          );
-          return false;
-        }
-
-        foregroundPermission = await Location.requestForegroundPermissionsAsync();
-        if (foregroundPermission.status !== 'granted') {
-          if (!foregroundPermission.canAskAgain) {
-            promptForBackgroundLocationSettings(
-              'Location access is currently blocked. Open app settings and change it to "Allow all the time" for background responder tracking.'
-            );
-          }
-          return false;
-        }
-      }
-
-      let backgroundPermission = await Location.getBackgroundPermissionsAsync();
-      if (backgroundPermission.status === 'granted') {
-        locationPermissionPromptShownRef.current = false;
-        return true;
-      }
-
-      if (!interactive) {
-        return false;
-      }
-
-      if (!backgroundPermission.canAskAgain) {
-        promptForBackgroundLocationSettings(
-          'Choose "Allow all the time" for Location so the responder overlay can continue sending updates while the app is in the background.'
-        );
-        return false;
-      }
-
-      backgroundPermission = await Location.requestBackgroundPermissionsAsync();
-      if (backgroundPermission.status === 'granted') {
-        locationPermissionPromptShownRef.current = false;
-        return true;
-      }
-
-      promptForBackgroundLocationSettings(
-        'The floating responder bubble needs Location access set to "Allow all the time" so updates continue after you leave the app.'
-      );
-      return false;
-    },
-    [promptForBackgroundLocationSettings]
-  );
-
   const syncOverlayStateForAppState = useCallback(
     async (nextState: string) => {
       if (Platform.OS !== 'android') {
@@ -328,44 +221,12 @@ const AppContent = () => {
         return;
       }
 
-      const hasRequiredLocationPermission = await ensureAndroidBackgroundLocationPermission(
-        nextState === 'active'
-      );
-      if (!hasRequiredLocationPermission) {
-        return;
-      }
-
-      const overlayStatus = await startOverlayLocationService();
-      if (overlayStatus === 'permission_missing') {
-        if (nextState === 'active' && !overlayPermissionPromptShownRef.current) {
-          overlayPermissionPromptShownRef.current = true;
-          Alert.alert(
-            'Enable Floating Location Bubble',
-            'Allow "Display over other apps" so the floating location button can work like Messenger chat heads.',
-            [
-              { text: 'Not now', style: 'cancel' },
-              {
-                text: 'Open settings',
-                onPress: () => {
-                  void openOverlayPermissionSettings();
-                },
-              },
-            ]
-          );
-        }
-        return;
-      }
-
-      if (overlayStatus === 'started') {
-        overlayPermissionPromptShownRef.current = false;
-        const shouldShowBubble = nextState !== 'active';
-        await setOverlayBubbleVisible(shouldShowBubble);
-        if (!shouldShowBubble) {
-          await consumeOverlayNavigationIfAny();
-        }
+      const isRunning = await isOverlayLocationServiceRunning();
+      if (!isRunning) {
+        await startOverlayLocationService();
       }
     },
-    [consumeOverlayNavigationIfAny, ensureAndroidBackgroundLocationPermission, isLoggedIn]
+    [isLoggedIn]
   );
 
   const refreshIncomingIncident = useCallback(async () => {
@@ -512,11 +373,16 @@ const AppContent = () => {
       try {
         const location = await locationService.getCurrentLocation(true);
         if (!isMounted) return;
+        console.log('[Location] Sending location to server: lat=' + location.latitude + ', lng=' + location.longitude);
         await sendLocation(
           { lat: location.latitude, lng: location.longitude },
           { repeat: false },
           hasValidReportId ? Number(reportIdValue) : undefined
         );
+        // Save location to Firebase Realtime Database (non-blocking)
+        if (currentUserId) {
+          void saveResponderLocation(currentUserId, location.latitude, location.longitude);
+        }
       } catch (error) {
         console.log('[Location] Failed to send location:', error);
       } finally {
@@ -615,11 +481,16 @@ const AppContent = () => {
           const userData = await login(credentials.email, credentials.password);
           setUserName(resolveUserName(userData));
           setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
+          // Check for saved marker before navigating
+          const savedMarker = await AsyncStorage.getItem(ASYNC_STORAGE_MARKER_KEY);
+          setSelectedMarkerKey(savedMarker);
           setIsLoggedIn(true);
+          if (!savedMarker) {
+            // Will navigate to MarkerSelect after nav ready
+          }
         }
       } catch (error) {
         console.log('Auto-login failed:', error);
-        // Credentials will remain in storage for manual login attempt
       } finally {
         setIsAutoLoggingIn(false);
       }
@@ -628,15 +499,15 @@ const AppContent = () => {
     attemptAutoLogin();
   }, [resolveUserName]);
 
-  // Fetch incoming incident every 3 seconds
+  // Fetch incoming incident every 1 second
   useEffect(() => {
     // Initial fetch
     void refreshIncomingIncident();
 
-    // Set up polling every 3 seconds
+    // Set up polling every 1 second
     const intervalId = setInterval(() => {
       void refreshIncomingIncident();
-    }, 3000);
+    }, 1000);
 
     // Cleanup interval on unmount
     return () => clearInterval(intervalId);
@@ -674,7 +545,7 @@ const AppContent = () => {
   const handleToggleMapFullscreen = useCallback(() => {
     setState((prev) => ({
       ...prev,
-      isMapFullscreen: !prev.isMapFullscreen,
+      isMapFullscreen: true,
     }));
   }, []);
 
@@ -768,10 +639,12 @@ const AppContent = () => {
     });
   }, []);
 
-  const handleLogin = useCallback((userData: any) => {
+  const handleLogin = useCallback(async (userData: any) => {
     console.log('Login successful:', userData);
     setUserName(resolveUserName(userData));
     setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
+    const savedMarker = await AsyncStorage.getItem(ASYNC_STORAGE_MARKER_KEY);
+    setSelectedMarkerKey(savedMarker);
     setIsLoggedIn(true);
   }, [resolveUserName]);
 
@@ -1011,6 +884,7 @@ const AppContent = () => {
     surfaceAlt: isDarkMode ? '#334155' : '#E2E8F0',
     text: isDarkMode ? '#F8FAFC' : '#0F172A',
     textSecondary: isDarkMode ? '#94A3B8' : '#475569',
+    border: isDarkMode ? '#334155' : '#E2E8F0',
   };
   const isStatusCompleted = trackerCurrentStatus === 'Completed';
   const mapShouldBeFullscreen = state.isMapFullscreen;
@@ -1040,7 +914,7 @@ const AppContent = () => {
         console.log('handleNextStatus - nextStatus:', nextStatus);
         const success = await updateReportStatus({
           status: nextStatus.status,
-          reportId: normalizedIncidentId,
+          reportId: normalizedIncidentId ?? undefined,
         });
         console.log('updateReportStatus success:', success);
         if (success) {
@@ -1051,7 +925,7 @@ const AppContent = () => {
             return;
           }
           // Otherwise update the tracker status
-          const statusData = await fetchReportStatus(normalizedIncidentId);
+          const statusData = await fetchReportStatus(normalizedIncidentId ?? undefined);
           if (statusData) {
             const currentStatus = getCurrentStatus(statusData);
             console.log('Fetched currentStatus:', currentStatus);
@@ -1067,6 +941,19 @@ const AppContent = () => {
   }, [getNextStatusButton, handleUpdateStatus, state.activeIncident?.id]);
 
   const nextStatusButton = getNextStatusButton();
+
+  // Navigate to MarkerSelect after login if no marker saved
+  // MUST be before any early returns to comply with Rules of Hooks
+  useEffect(() => {
+    if (isLoggedIn && isNavigationReady && selectedMarkerKey === null) {
+      navigate('MarkerSelect');
+    }
+  }, [isLoggedIn, isNavigationReady, selectedMarkerKey]);
+
+  const handleMarkerSaved = useCallback((markerKey: MarkerKey) => {
+    setSelectedMarkerKey(markerKey);
+    navigate('Home');
+  }, []);
 
   // Show loading screen while checking auto-login
   if (isAutoLoggingIn) {
@@ -1107,10 +994,14 @@ const AppContent = () => {
         </View>
       );
     }
+    // When no active incident — show car icon button to open marker selector
     return (
-      <View style={[styles.statusBadge, { backgroundColor: theme.surfaceAlt }]}>
-        <Text style={[styles.statusBadgeText, { color: theme.text }]}>Available</Text>
-      </View>
+      <TouchableOpacity
+        style={[styles.markerPickerBtn, { backgroundColor: theme.surfaceAlt }]}
+        onPress={() => navigate('MarkerSelect')}
+        activeOpacity={0.8}>
+        <Icon name="car" size={20} color={DEFAULT_CONFIG.primary_color} />
+      </TouchableOpacity>
     );
   };
 
@@ -1185,46 +1076,28 @@ const AppContent = () => {
   );
 
   const renderHomeScreen = () => {
-    if (state.isMapFullscreen) {
-      return (
-        <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
-          <StatusBar />
-          {renderHeader(true)}
-          <Map
-            isDarkMode={isDarkMode}
-            isFullscreen={true}
-            incident={state.activeIncident}
-            onToggleFullscreen={handleToggleMapFullscreen}
-            onRestoreSize={handleRestoreMapSize}
-            showFullscreenToggle={!isStatusCompleted}
-            isMovingBearingEnabled={isMovingBearingEnabled}
-            onMovingBearingChange={setIsMovingBearingEnabled}
-          />
-          {/* Action Buttons - Show in fullscreen map */}
-          {state.activeIncident && nextStatusButton && (
-            <View style={styles.fullscreenActionButtons} key={`fullscreen-buttons-${nextStatusButton.label}`}>
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: nextStatusButton.color }]}
-                onPress={handleNextStatus}>
-                <Icon name={nextStatusButton.icon as any} size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>{nextStatusButton.label}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-                onPress={handleOpenChat}>
-                <Icon name="chat" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Chats</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      );
-    }
-
     return (
-      <>
-        <Background />
+      <View style={{ flex: 1 }}>
+        {/* Always mounted Fullscreen Map, hidden when not active */}
+        <View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }, state.isMapFullscreen ? { display: 'flex' } : { display: 'none' }]}>
+          <FullscreenMapScreen
+            isDarkMode={isDarkMode}
+            theme={theme}
+            headerComponent={renderHeader(true)}
+            incident={state.activeIncident}
+            onToggleFullscreen={handleRestoreMapSize}
+            isStatusCompleted={isStatusCompleted}
+            isActive={state.isMapFullscreen}
+            nextStatusButton={nextStatusButton}
+            onNextStatus={handleNextStatus}
+            onOpenChat={handleOpenChat}
+            markerKey={selectedMarkerKey}
+          />
+        </View>
+
+        {/* Normal layout, Map is hidden when fullscreen is active */}
+        <View style={[{ flex: 1 }, state.isMapFullscreen ? { display: 'none' } : { display: 'flex' }]}>
+          <Background />
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
           <StatusBar />
           {renderHeader()}
@@ -1272,10 +1145,11 @@ const AppContent = () => {
 
               <Map
                 isDarkMode={isDarkMode}
-                isFullscreen={mapShouldBeFullscreen}
+                isFullscreen={false}
+                isActive={!state.isMapFullscreen}
                 incident={state.activeIncident}
                 onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
-                onRestoreSize={handleRestoreMapSize}
+                onRestoreSize={() => {}}
                 onMapPress={() => setIsMapInteracting(true)}
                 onMapRelease={() => setIsMapInteracting(false)}
                 showFullscreenToggle={!isStatusCompleted}
@@ -1283,6 +1157,7 @@ const AppContent = () => {
                 containerStyle={styles.heroMap}
                 isMovingBearingEnabled={isMovingBearingEnabled}
                 onMovingBearingChange={setIsMovingBearingEnabled}
+                markerKey={selectedMarkerKey}
               />
 
               {/* Action Buttons - Show only when there's an active incident */}
@@ -1418,7 +1293,8 @@ const AppContent = () => {
             )}
           </ScrollView>
         </SafeAreaView>
-      </>
+        </View>
+      </View>
     );
   };
 
@@ -1485,6 +1361,17 @@ const AppContent = () => {
               <ReportScreen
                 incidentId={state.activeIncident?.id}
                 isDarkMode={isDarkMode}
+                onBack={() => navigation.goBack()}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen name="MarkerSelect" options={{ animation: 'slide_from_bottom' }}>
+            {({ navigation }) => (
+              <MarkerSelectScreen
+                isDarkMode={isDarkMode}
+                onSave={handleMarkerSaved}
+                initialMarker={selectedMarkerKey}
+                showBackButton={selectedMarkerKey !== null}
                 onBack={() => navigation.goBack()}
               />
             )}
@@ -1590,6 +1477,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 11,
     fontWeight: '700',
+  },
+  markerPickerBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mainContent: {
     flex: 1,

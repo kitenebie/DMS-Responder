@@ -58,6 +58,12 @@ const ChevronRightIcon = ({ size = 24, color = '#9CA3AF' }: { size?: number; col
   </Svg>
 );
 
+const ChevronLeftIcon = ({ size = 24, color = '#9CA3AF' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+  </Svg>
+);
+
 const SendIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
     <Path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -106,7 +112,15 @@ const MapPinIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: s
   </Svg>
 );
 
-const ThemeIcon = ({ size = 24, color = '#F8FAFC', isDark = true }: { size?: number; color?: string; isDark?: boolean }) => (
+const ThemeIcon = ({
+  size = 24,
+  color = '#F8FAFC',
+  isDark = true,
+}: {
+  size?: number;
+  color?: string;
+  isDark?: boolean;
+}) =>
   isDark ? (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
       <Path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -115,8 +129,7 @@ const ThemeIcon = ({ size = 24, color = '#F8FAFC', isDark = true }: { size?: num
     <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
       <Path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
     </Svg>
-  )
-);
+  );
 
 const FullscreenIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
@@ -124,7 +137,13 @@ const FullscreenIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color
   </Svg>
 );
 
-const FullscreenExitIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+const FullscreenExitIcon = ({
+  size = 24,
+  color = '#F8FAFC',
+}: {
+  size?: number;
+  color?: string;
+}) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
     <Path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
   </Svg>
@@ -219,6 +238,24 @@ const LayersIcon = ({ size = 24, color = '#3B82F6' }: { size?: number; color?: s
   </Svg>
 );
 
+const CarIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z" />
+  </Svg>
+);
+
+const WalkIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9 7 23h2.1l1.7-7.5 2 2V23h2v-6.5l-2.1-2 .6-3c1.3 1.5 3.1 2.5 5.2 2.5v-2c-1.6 0-3.1-.8-4-2.1l-1-1.6c-.4-.6-1-.9-1.7-.9-.3 0-.5 0-.8.1L7 9.1V14h2V10l1.8-1.1z" />
+  </Svg>
+);
+
+const BikeIcon = ({ size = 24, color = '#F8FAFC' }: { size?: number; color?: string }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
+    <Path d="M15 5.5c.83 0 1.5-.67 1.5-1.5S15.83 2.5 15 2.5 13.5 3.17 13.5 4 14.17 5.5 15 5.5zM5.5 18.5c-1.65 0-3-1.35-3-3s1.35-3 3-3c1.06 0 2 .56 2.53 1.4L6.3 15.2c-.19-.44-.63-.7-1.1-.7-.66 0-1.2.54-1.2 1.2s.54 1.2 1.2 1.2c.57 0 1.04-.4 1.16-.93l1.4 1.1c-.5 1.06-1.58 1.8-2.76 1.8zm13 0c-1.65 0-3-1.35-3-3 0-.27.04-.53.1-.78l-2.52-2.12-1.9 2.9H9.7l2.6-4-1.4-1.1-1.6 2.4H7.9l2.7-4.1c.28-.43.8-.7 1.33-.7.33 0 .65.1.92.28l2.1 1.4H18v1.5h-2l1.2 1.02c.4-.22.85-.34 1.3-.34 1.65 0 3 1.35 3 3s-1.35 3-3 3zm0-4.5c-.66 0-1.2.54-1.2 1.2s.54 1.2 1.2 1.2 1.2-.54 1.2-1.2-.54-1.2-1.2-1.2z" />
+  </Svg>
+);
+
 // Main Icon component
 export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', style }) => {
   const iconProps = { size, color };
@@ -240,6 +277,8 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', 
       return <CloseIcon {...iconProps} />;
     case 'chevron-right':
       return <ChevronRightIcon {...iconProps} />;
+    case 'chevron-left':
+      return <ChevronLeftIcon {...iconProps} />;
     case 'send':
       return <SendIcon {...iconProps} />;
     case 'paperclip':
@@ -286,6 +325,12 @@ export const Icon: React.FC<IconProps> = ({ name, size = 24, color = '#F8FAFC', 
       return <MyLocationIcon {...iconProps} />;
     case 'layers':
       return <LayersIcon {...iconProps} />;
+    case 'car':
+      return <CarIcon {...iconProps} />;
+    case 'walk':
+      return <WalkIcon {...iconProps} />;
+    case 'bike':
+      return <BikeIcon {...iconProps} />;
     default:
       return null;
   }

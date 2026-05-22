@@ -71,7 +71,7 @@ class LocationOverlayService : Service() {
     private const val PREF_LAST_REPORT_ID = "last_report_id"
     private const val CHANNEL_ID = "overlay_location_channel"
     private const val NOTIFICATION_ID = 4051
-    private const val LOCATION_UPDATE_INTERVAL_MS = 15_000L
+    private const val LOCATION_UPDATE_INTERVAL_MS = 2_500L
     private const val SCREEN_REPORT_CHATS = "ReportChats"
     private const val WAKE_LOCK_TAG = "Responder:OverlayLocationServiceWakeLock"
     private val running = AtomicBoolean(false)
@@ -123,11 +123,8 @@ class LocationOverlayService : Service() {
       foregroundStarted = true
     }
 
-    if (!canDrawOverlays()) {
-      showToast("Enable display over other apps for the floating bubble.")
-      stopSelf()
-      return START_NOT_STICKY
-    }
+    // Background tracking continues regardless of overlay permission.
+    // Bubble will only display if permission is granted.
 
     startPeriodicLocationUpdates()
 
@@ -203,13 +200,11 @@ class LocationOverlayService : Service() {
   }
 
   private fun applyOverlayVisibility(visible: Boolean) {
-    if (visible) {
-      if (overlayView == null) {
-        showOverlayBubble()
-      }
-      return
+    if (visible && canDrawOverlays()) {
+      showOverlayBubble()
+    } else {
+      removeOverlayBubble()
     }
-    removeOverlayBubble()
   }
 
   private fun persistConfig(intent: Intent?) {
@@ -424,10 +419,10 @@ class LocationOverlayService : Service() {
   }
 
   private fun canDrawOverlays(): Boolean {
-    return if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-      true
-    } else {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       Settings.canDrawOverlays(this)
+    } else {
+      true
     }
   }
 
@@ -508,6 +503,7 @@ class LocationOverlayService : Service() {
 
   private fun postLocationToServer(latitude: Double, longitude: Double, notifyUser: Boolean) {
     networkExecutor.execute {
+      android.util.Log.d("LocationOverlayService", "Background Service: Sending location to server: lat=$latitude, lng=$longitude")
       val sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
       val baseUrl = sharedPreferences.getString(PREF_BASE_URL, "")?.trim().orEmpty()
       val token = sharedPreferences.getString(PREF_TOKEN, "")?.trim().orEmpty()

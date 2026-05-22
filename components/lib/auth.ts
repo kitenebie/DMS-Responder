@@ -2,13 +2,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './axios';
 import FirebaseNotificationService from '../../services/FirebaseNotificationService';
 
+let cachedUser: any = null;
+
 export const getStoredUser = async () => {
+  if (cachedUser) {
+    return cachedUser;
+  }
   try {
     const userData = await AsyncStorage.getItem('user');
-    return userData ? JSON.parse(userData) : null;
+    if (userData) {
+      cachedUser = JSON.parse(userData);
+      return cachedUser;
+    }
+    return null;
   } catch (error) {
-    console.log('Failed to get stored user:', error);
-    console.log('Failed to get stored user:', error);
     console.log('Failed to get stored user:', error);
     return null;
   }
@@ -67,6 +74,7 @@ export const login = async (email: string, password: string, rememberMe: boolean
 
     // Store user data
     await AsyncStorage.setItem('user', JSON.stringify(userData));
+    cachedUser = userData;
     console.log('User data stored successfully');
 
     // Store refresh token if provided
@@ -133,6 +141,7 @@ export const logout = async () => {
 
   try {
     await AsyncStorage.removeItem('user');
+    cachedUser = null;
     await AsyncStorage.removeItem('credentials');
     await AsyncStorage.removeItem('csrf_token');
     await AsyncStorage.removeItem('refresh_token');
@@ -180,6 +189,7 @@ export const refreshLogin = async () => {
     });
     const userData = response.data;
     await AsyncStorage.setItem('user', JSON.stringify(userData));
+    cachedUser = userData;
     if (userData.refresh_token) {
       await AsyncStorage.setItem('refresh_token', userData.refresh_token);
     }

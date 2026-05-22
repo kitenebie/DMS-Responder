@@ -23,13 +23,7 @@ class OverlayLocationModule(
 
   @ReactMethod
   fun isOverlayPermissionGranted(promise: Promise) {
-    val granted =
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-        true
-      } else {
-        Settings.canDrawOverlays(reactContext)
-      }
-    promise.resolve(granted)
+    promise.resolve(true)
   }
 
   @ReactMethod
@@ -59,18 +53,10 @@ class OverlayLocationModule(
 
   @ReactMethod
   fun startOverlay(options: ReadableMap?, promise: Promise) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(reactContext)) {
-      promise.reject(
-        "OVERLAY_PERMISSION_DENIED",
-        "Overlay permission is required before starting the floating bubble."
-      )
-      return
-    }
-
     if (!hasAnyLocationPermission()) {
       promise.reject(
         "LOCATION_PERMISSION_DENIED",
-        "Location permission is required before starting the floating bubble."
+        "Location permission is required before starting the background tracking."
       )
       return
     }

@@ -1,16 +1,28 @@
 import React, { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { StyleSheet, View, TouchableOpacity, Vibration, Text } from 'react-native';
+import {
+  StyleSheet,
+  View,
+  TouchableOpacity,
+  Text,
+  Image,
+  Animated,
+  ActivityIndicator,
+} from 'react-native';
 import { Incident } from '../src/types';
+import { getMarkerImage } from './MarkerSelectScreen';
 import {
   MapView,
   UserLocation,
   Camera,
   type CameraRef,
-  PointAnnotation,
+  MarkerView,
   ShapeSource,
   LineLayer,
   UserTrackingMode,
+  Images,
+  SymbolLayer,
 } from '@maplibre/maplibre-react-native';
+import * as Location from 'expo-location';
 import { locationService, type LocationCoords } from './services/locationService';
 import { useRouteStore } from './routeStore';
 import { Icon } from './Icon';
@@ -40,8 +52,6 @@ const createRasterMapStyle = (
   ],
 });
 
-const ARRIVAL_VIBRATION_PATTERN = [0, 220, 140, 220, 140, 220, 140, 220, 140, 220];
-
 // Free raster basemaps for the responder map (no API key required)
 const OPEN_STREET_MAP_STYLE = createRasterMapStyle(
   'osm',
@@ -59,10 +69,12 @@ interface MapScreenProps {
   isDarkMode: boolean;
   incident?: Incident | null;
   onToggleFullscreen?: () => void;
-  isFullscreen?: boolean;
+  isFullscreen: boolean;
+  isActive?: boolean;
   showFullscreenToggle?: boolean;
   isMovingBearingEnabled?: boolean;
   onMovingBearingChange?: (enabled: boolean) => void;
+  markerKey?: string | null;
 }
 
 interface RouteStep {
@@ -93,6 +105,13 @@ const normalizeIncidentCoords = (coords?: { lat: number; lng: number } | null) =
   return null;
 };
 
+const getCompassDirection = (heading: number) => {
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  const normalizedHeading = ((heading % 360) + 360) % 360;
+  const index = Math.round(normalizedHeading / 45) % 8;
+  return directions[index];
+};
+
 const toRadians = (deg: number) => (deg * Math.PI) / 180;
 const distanceMeters = (a: [number, number], b: [number, number]) => {
   const R = 6371e3;
@@ -113,10 +132,7 @@ const distanceMeters = (a: [number, number], b: [number, number]) => {
  * to a polyline (array of [lng, lat] coordinates).
  * Used to detect if the responder has deviated from the route.
  */
-const distanceToPolyline = (
-  point: [number, number],
-  polyline: [number, number][]
-): number => {
+const distanceToPolyline = (point: [number, number], polyline: [number, number][]): number => {
   if (polyline.length === 0) return Infinity;
   if (polyline.length === 1) return distanceMeters(point, polyline[0]);
 
@@ -127,9 +143,12 @@ const distanceToPolyline = (
     const B = polyline[i + 1];
 
     // Project point P onto segment AB, get closest point on segment
-    const ax = A[0], ay = A[1];
-    const bx = B[0], by = B[1];
-    const px = point[0], py = point[1];
+    const ax = A[0],
+      ay = A[1];
+    const bx = B[0],
+      by = B[1];
+    const px = point[0],
+      py = point[1];
 
     const dx = bx - ax;
     const dy = by - ay;
@@ -162,10 +181,55 @@ const MapScreen = memo(function MapScreen({
   incident,
   onToggleFullscreen,
   isFullscreen,
+  isActive = true,
   showFullscreenToggle = true,
   isMovingBearingEnabled: isMovingBearingEnabledProp,
   onMovingBearingChange,
+  markerKey,
 }: MapScreenProps) {
+  const selectedMarkerImage = getMarkerImage(markerKey);
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim2 = useRef(new Animated.Value(0)).current;
+
+  // Destination marker radar pulse ping animation (JS driver - required inside MarkerView)
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: 1800,
+        useNativeDriver: false,
+      })
+    ).start();
+    // Second ring starts delayed for a staggered radar effect
+    setTimeout(() => {
+      Animated.loop(
+        Animated.timing(pulseAnim2, {
+          toValue: 1,
+          duration: 1800,
+          useNativeDriver: false,
+        })
+      ).start();
+    }, 900);
+  }, [pulseAnim, pulseAnim2]);
+
+  const pulseScale = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.5, 2.6],
+  });
+  const pulseOpacity = pulseAnim.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.7, 0.4, 0],
+  });
+
+  const pulseScale2 = pulseAnim2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.5, 2.6],
+  });
+  const pulseOpacity2 = pulseAnim2.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.7, 0.4, 0],
+  });
+
   const [initialCenter, setInitialCenter] = useState<[number, number] | null>(null);
   const [userLocation, setUserLocation] = useState<LocationCoords | null>(null);
   const [, setUserAddress] = useState<string>('Getting location...');
@@ -173,6 +237,10 @@ const MapScreen = memo(function MapScreen({
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const routeGeometry = useRouteStore((state) => state.routeGeometry);
   const routeSteps = useRouteStore((state) => state.routeSteps);
+  const isRouteLoading = useRouteStore((state) => state.isRouteLoading);
+  const routeError = useRouteStore((state) => state.error);
+  const routeProfile = useRouteStore((state) => state.routeProfile);
+  const setRouteProfile = useRouteStore((state) => state.setRouteProfile);
   const fetchRoute = useRouteStore((state) => state.fetchRoute);
   const clearRoute = useRouteStore((state) => state.clearRoute);
   const [routeVersion, setRouteVersion] = useState<number>(0);
@@ -183,14 +251,64 @@ const MapScreen = memo(function MapScreen({
   const [arrivalAlertIncidentId, setArrivalAlertIncidentId] = useState<Incident['id'] | null>(null);
   const [nextStepIndex, setNextStepIndex] = useState<number>(0);
   const [isRerouting, setIsRerouting] = useState(false);
+  const [mapHeading, setMapHeading] = useState<number>(0);
+  const [deviceHeading, setDeviceHeading] = useState<number>(0);
   const cameraRef = useRef<CameraRef | null>(null);
   const lastMovingBearingCameraUpdateMsRef = useRef<number>(0);
+  const isUserInteractingRef = useRef(false);
   // Tracks consecutive off-route GPS checks to avoid false positives from jitter
   const offRouteCountRef = useRef<number>(0);
   // Stores the destination coordinates for rerouting without incident dependency
   const destCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   // Prevents simultaneous reroute fetches
   const isReroutingRef = useRef(false);
+  // Ensures initial route is fetched once per incident (after userLocation becomes available)
+  const initialRouteFetchKeyRef = useRef<string | null>(null);
+  const lastInitialRouteAttemptMsRef = useRef<number>(0);
+  const lastMarkerKeyAppliedRef = useRef<string | null>(null);
+  const movingBearingToggleInFlightRef = useRef(false);
+
+  const isValidHeading = useCallback((value: unknown): value is number => {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  }, []);
+
+  const setMovingBearingEnabled = useCallback(
+    (enabled: boolean) => {
+      if (onMovingBearingChange) {
+        onMovingBearingChange(enabled);
+      } else {
+        setIsMovingBearingEnabledLocal(enabled);
+      }
+    },
+    [onMovingBearingChange]
+  );
+
+  // Watch hardware compass heading
+  useEffect(() => {
+    let headingSub: Location.LocationSubscription | null = null;
+    let isSubscribed = true;
+
+    if (hasLocationPermission && isActive) {
+      Location.watchHeadingAsync((data) => {
+        if (isSubscribed) {
+          const heading = data.trueHeading >= 0 ? data.trueHeading : data.magHeading;
+          if (heading >= 0) setDeviceHeading(heading);
+        }
+      })
+        .then((sub) => {
+          if (isSubscribed) headingSub = sub;
+          else sub.remove();
+        })
+        .catch(console.error);
+    }
+
+    return () => {
+      isSubscribed = false;
+      if (headingSub) {
+        headingSub.remove();
+      }
+    };
+  }, [hasLocationPermission, isActive]);
 
   // Fetch user's current address using OSM Nominatim
   const fetchUserAddress = useCallback(async (latitude: number, longitude: number) => {
@@ -256,14 +374,14 @@ const MapScreen = memo(function MapScreen({
     };
   }, [fetchUserAddress]);
 
-
-
   const incidentCoordinates = incident?.coordinates;
 
   const normalizedIncident = useMemo(
     () => normalizeIncidentCoords(incidentCoordinates),
     [incidentCoordinates]
   );
+  const destLat = normalizedIncident?.lat;
+  const destLng = normalizedIncident?.lng;
   const incidentDistanceMeters = useMemo(() => {
     if (!userLocation || !normalizedIncident) return null;
 
@@ -277,43 +395,101 @@ const MapScreen = memo(function MapScreen({
     return OPEN_STREET_MAP_STYLE;
   }, []);
 
-
-
-  // Fetch initial route ONLY when incident changes — NOT on every userLocation update.
-  // Re-routing on deviation is handled separately by the off-route detector below.
+  // Reset route state when destination changes (incident changes).
   useEffect(() => {
-    if (incident?.id && normalizedIncident && userLocation) {
-      const destLat = normalizedIncident.lat;
-      const destLng = normalizedIncident.lng;
-
-      // Store destination for later rerouting without re-subscribing to incident
-      destCoordsRef.current = { lat: destLat, lng: destLng };
-      offRouteCountRef.current = 0;
-
-      fetchRoute({
-        userLat: userLocation.latitude,
-        userLng: userLocation.longitude,
-        destLat,
-        destLng,
-      });
-      setRouteVersion((prev) => prev + 1);
-      setNextStepIndex(0);
-    } else {
+    if (!incident?.id || destLat == null || destLng == null) {
       destCoordsRef.current = null;
       offRouteCountRef.current = 0;
+      initialRouteFetchKeyRef.current = null;
       clearRoute();
       setNextStepIndex(0);
       setRouteVersion((prev) => prev + 1);
+      return;
     }
-  // Only re-fetch on incident change — not on userLocation change
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incident?.id, normalizedIncident?.lat, normalizedIncident?.lng]);
+
+    destCoordsRef.current = { lat: destLat, lng: destLng };
+    offRouteCountRef.current = 0;
+    initialRouteFetchKeyRef.current = null;
+    clearRoute();
+    setNextStepIndex(0);
+    setRouteVersion((prev) => prev + 1);
+  }, [incident?.id, destLat, destLng, clearRoute]);
+
+  // Fetch initial route ONCE per incident, after userLocation becomes available.
+  // Re-routing on deviation is handled separately by the off-route detector below.
+  useEffect(() => {
+    const userLat = userLocation?.latitude;
+    const userLng = userLocation?.longitude;
+    if (!incident?.id || destLat == null || destLng == null || userLat == null || userLng == null)
+      return;
+
+    const key = `${incident.id}:${destLat},${destLng}:${routeProfile}`;
+    const hasExistingRoute =
+      Array.isArray(routeGeometry?.coordinates) && routeGeometry.coordinates.length > 0;
+
+    if (initialRouteFetchKeyRef.current === key && hasExistingRoute) return;
+
+    // Avoid spamming OSRM if something is failing (e.g. network) while location updates stream in
+    const now = Date.now();
+    if (
+      initialRouteFetchKeyRef.current === key &&
+      now - lastInitialRouteAttemptMsRef.current < 5000
+    ) {
+      return;
+    }
+
+    initialRouteFetchKeyRef.current = key;
+    lastInitialRouteAttemptMsRef.current = now;
+
+    fetchRoute({
+      userLat,
+      userLng,
+      destLat,
+      destLng,
+    });
+    setRouteVersion((prev) => prev + 1);
+    setNextStepIndex(0);
+  }, [
+    incident?.id,
+    destLat,
+    destLng,
+    userLocation?.latitude,
+    userLocation?.longitude,
+    routeProfile,
+    routeGeometry,
+    fetchRoute,
+  ]);
+
+  const handleSetRouteProfile = useCallback(
+    (nextProfile: 'driving' | 'foot') => {
+      if (routeProfile === nextProfile) return;
+      setRouteProfile(nextProfile);
+      initialRouteFetchKeyRef.current = null;
+      clearRoute();
+      setNextStepIndex(0);
+      setRouteVersion((prev) => prev + 1);
+    },
+    [clearRoute, routeProfile, setRouteProfile]
+  );
+
+  // Default route profile based on selected marker.
+  // If the saved marker is "man" (On Foot), default routing should be "foot".
+  useEffect(() => {
+    if (!markerKey) return;
+    if (lastMarkerKeyAppliedRef.current === markerKey) return;
+    lastMarkerKeyAppliedRef.current = markerKey;
+
+    if (markerKey === 'man') {
+      handleSetRouteProfile('foot');
+    }
+  }, [handleSetRouteProfile, markerKey]);
 
   // Handle user location updates
   const handleCameraUserLocationChange = useCallback(
     (location: any) => {
       if (location && location.coords) {
         const { latitude, longitude, heading } = location.coords;
+        const normalizedHeading = isValidHeading(heading) ? heading : undefined;
 
         console.log('[MapScreen] Location update:', {
           lat: latitude,
@@ -323,35 +499,45 @@ const MapScreen = memo(function MapScreen({
           isValidHeading: typeof heading === 'number' && !isNaN(heading),
         });
 
-        setUserLocation({ latitude, longitude, heading });
+        setUserLocation({ latitude, longitude, heading: normalizedHeading });
         fetchUserAddress(latitude, longitude);
 
         // Send location with heading to server
-        if (typeof heading === 'number' && !isNaN(heading)) {
-          console.log(`[MapScreen] Sending location with heading: ${heading}°`);
-          locationService.sendLocationWithHeading({ latitude, longitude }, heading).catch((error) => {
-            console.log('[MapScreen] Failed to send location with heading:', error);
-          });
+        if (typeof normalizedHeading === 'number') {
+          console.log(`[MapScreen] Sending location with heading: ${normalizedHeading}°`);
+          locationService
+            .sendLocationWithHeading({ latitude, longitude }, normalizedHeading)
+            .catch((error) => {
+              console.log('[MapScreen] Failed to send location with heading:', error);
+            });
         } else {
           console.log(`[MapScreen] No valid heading to send (value: ${heading})`);
         }
 
         if (isMovingBearingActive) {
+          const effectiveHeading =
+            normalizedHeading ?? (isValidHeading(deviceHeading) ? deviceHeading : undefined);
+          if (typeof effectiveHeading === 'number') setMapHeading(effectiveHeading);
           const now = Date.now();
           if (now - lastMovingBearingCameraUpdateMsRef.current >= 250) {
             lastMovingBearingCameraUpdateMsRef.current = now;
 
-            console.log(`[MapScreen] Updating camera with heading: ${heading}°`);
-            cameraRef.current?.setCamera({
+            console.log(
+              `[MapScreen] Updating camera with heading: ${
+                typeof effectiveHeading === 'number' ? effectiveHeading : 'n/a'
+              }°`
+            );
+            const cameraUpdate: any = {
               centerCoordinate: [longitude, latitude],
-              heading,
               animationDuration: 250,
-            });
+            };
+            if (typeof effectiveHeading === 'number') cameraUpdate.heading = effectiveHeading;
+            cameraRef.current?.setCamera(cameraUpdate);
           }
         }
       }
     },
-    [fetchUserAddress, isMovingBearingActive]
+    [deviceHeading, fetchUserAddress, isMovingBearingActive, isValidHeading]
   );
 
   // Off-route detection: checks every time userLocation updates.
@@ -370,7 +556,9 @@ const MapScreen = memo(function MapScreen({
 
     if (deviation > OFF_ROUTE_THRESHOLD_M) {
       offRouteCountRef.current += 1;
-      console.log(`[Reroute] Off-route: ${deviation.toFixed(0)}m (check ${offRouteCountRef.current}/${OFF_ROUTE_CONSECUTIVE_CHECKS})`);
+      console.log(
+        `[Reroute] Off-route: ${deviation.toFixed(0)}m (check ${offRouteCountRef.current}/${OFF_ROUTE_CONSECUTIVE_CHECKS})`
+      );
 
       if (offRouteCountRef.current >= OFF_ROUTE_CONSECUTIVE_CHECKS) {
         offRouteCountRef.current = 0;
@@ -385,17 +573,19 @@ const MapScreen = memo(function MapScreen({
           userLng: userLocation.longitude,
           destLat: dest.lat,
           destLng: dest.lng,
-        }).then(() => {
-          isReroutingRef.current = false;
-          setIsRerouting(false);
-          setRouteVersion((prev) => prev + 1);
-          setNextStepIndex(0);
-          console.log('[Reroute] New route calculated successfully.');
-        }).catch(() => {
-          isReroutingRef.current = false;
-          setIsRerouting(false);
-          console.log('[Reroute] Reroute failed.');
-        });
+        })
+          .then(() => {
+            isReroutingRef.current = false;
+            setIsRerouting(false);
+            setRouteVersion((prev) => prev + 1);
+            setNextStepIndex(0);
+            console.log('[Reroute] New route calculated successfully.');
+          })
+          .catch(() => {
+            isReroutingRef.current = false;
+            setIsRerouting(false);
+            console.log('[Reroute] Reroute failed.');
+          });
       }
     } else {
       // Back on route — reset counter
@@ -433,62 +623,96 @@ const MapScreen = memo(function MapScreen({
     if (arrivalAlertIncidentId === incident.id) {
       return;
     }
-    Vibration.cancel();
-    Vibration.vibrate(ARRIVAL_VIBRATION_PATTERN, false);
     setArrivalAlertIncidentId(incident.id);
   }, [arrivalAlertIncidentId, incident?.id, incidentDistanceMeters]);
 
   const handleToggleFollow = useCallback(() => {
-    setIsFollowingUser((prev) => !prev);
-  }, []);
-
-  const recenterToUser = useCallback(() => {
-    if (!userLocation) return;
-    cameraRef.current?.setCamera({
-      centerCoordinate: [userLocation.longitude, userLocation.latitude],
-      animationDuration: 450,
+    setIsFollowingUser((prev) => {
+      const next = !prev;
+      if (!next && isMovingBearingEnabled) {
+        setMovingBearingEnabled(false);
+      }
+      return next;
     });
-  }, [userLocation]);
+  }, [isMovingBearingEnabled, setMovingBearingEnabled]);
 
-  const handleToggleMovingBearing = useCallback(() => {
-    if (!hasLocationPermission) {
-      setPermissionMessage('Location permission is required to use heading mode.');
-      return;
-    }
+  // const recenterToUser = useCallback(() => {
+  //   if (!userLocation) return;
+  //   lastMovingBearingCameraUpdateMsRef.current = 0;
+  //   cameraRef.current?.setCamera({
+  //     centerCoordinate: [userLocation.longitude, userLocation.latitude],
+  //     animationDuration: 450,
+  //   });
+  // }, [userLocation]);
 
-    if (isMovingBearingEnabled && !isFollowingUser) {
-      setIsFollowingUser(true);
-      recenterToUser();
-      return;
-    }
+  // const handleToggleMovingBearing = useCallback(async () => {
+  //   // TEMP (debug): disabled for now as requested.
+  //   // Re-enable by removing the early-return and uncommenting the implementation below.
+  //   movingBearingToggleInFlightRef.current = false;
+  //   setMovingBearingEnabled(false);
+  //   return;
 
-    const next = !isMovingBearingEnabled;
-    if (next) {
-      setIsFollowingUser(true);
-      recenterToUser();
-    }
+  //   /*
+  //   if (movingBearingToggleInFlightRef.current) return;
+  //   movingBearingToggleInFlightRef.current = true;
 
-    if (onMovingBearingChange) {
-      onMovingBearingChange(next);
-    } else {
-      setIsMovingBearingEnabledLocal(next);
-    }
-  }, [
-    hasLocationPermission,
-    isMovingBearingEnabled,
-    isFollowingUser,
-    onMovingBearingChange,
-    recenterToUser,
-  ]);
+  //   try {
+  //     const granted = hasLocationPermission || (await locationService.requestPermission(true));
+  //     setHasLocationPermission(granted);
 
-  const renderMode = 'native';
-  const androidRenderMode = undefined;
+  //     if (!granted) {
+  //       setPermissionMessage('Location permission is required to use heading mode.');
+  //       setMovingBearingEnabled(false);
+  //       return;
+  //     }
 
-  // Route line color based on theme
-  const routeColor = isDarkMode ? '#60a5fa' : '#3b82f6';
+  //     setPermissionMessage(null);
+
+  //     const next = !isMovingBearingEnabled;
+
+  //     if (next) {
+  //       setIsFollowingUser(true);
+
+  //       if (userLocation) {
+  //         const effectiveHeading =
+  //           (isValidHeading(userLocation.heading) ? userLocation.heading : undefined) ??
+  //           (isValidHeading(deviceHeading) ? deviceHeading : undefined);
+
+  //         const cameraUpdate: any = {
+  //           centerCoordinate: [userLocation.longitude, userLocation.latitude],
+  //           animationDuration: 450,
+  //         };
+  //         if (typeof effectiveHeading === 'number') cameraUpdate.heading = effectiveHeading;
+  //         cameraRef.current?.setCamera(cameraUpdate);
+  //       } else {
+  //         recenterToUser();
+  //       }
+
+  //       lastMovingBearingCameraUpdateMsRef.current = 0;
+  //     }
+
+  //     setMovingBearingEnabled(next);
+  //   } finally {
+  //     // Prevent double taps / racey toggles
+  //     setTimeout(() => {
+  //       movingBearingToggleInFlightRef.current = false;
+  //     }, 450);
+  //   }
+  //   */
+  // }, [setMovingBearingEnabled]);
+
+  const renderMode = 'normal';
+  const androidRenderMode = 'normal';
+
+  // Route line color based on theme - made stronger and more vibrant
+  const routeColor = isDarkMode ? '#38bdf8' : '#2563eb';
+  const routeCasingColor = isDarkMode ? '#0f172a' : '#1e3a8a';
+
+  const hasRouteLine = !!routeGeometry?.coordinates?.length;
 
   const routeSourceId = `route-source-${routeVersion}-${isFullscreen ? 'full' : 'norm'}`;
   const routeLineId = `route-line-${routeVersion}-${isFullscreen ? 'full' : 'norm'}`;
+  const userCarLayerId = `user-car-layer-${isFullscreen ? 'full' : 'norm'}`;
 
   return (
     <>
@@ -499,14 +723,34 @@ const MapScreen = memo(function MapScreen({
         onPress={onMapPress}
         onLongPress={onMapRelease}
         onRegionWillChange={(feature) => {
-          const rawIsUserInteraction = (feature as any)?.properties?.isUserInteraction;
+          const props = (feature as any)?.properties ?? {};
+          const rawIsUserInteraction = props.userInteraction ?? props.isUserInteraction;
           const isUserInteraction =
             rawIsUserInteraction === true ||
             rawIsUserInteraction === 'true' ||
             rawIsUserInteraction === 1;
 
           if (isUserInteraction) {
+            isUserInteractingRef.current = true;
             setIsFollowingUser(false);
+            if (isMovingBearingEnabled) {
+              setMovingBearingEnabled(false);
+            }
+          }
+        }}
+        onRegionIsChanging={(feature) => {
+          const payload = (feature as any)?.properties || (feature as any);
+          const newHeading = payload?.heading ?? payload?.bearing;
+          if (typeof newHeading === 'number') {
+            setMapHeading(newHeading);
+          }
+        }}
+        onRegionDidChange={(feature) => {
+          isUserInteractingRef.current = false;
+          const payload = (feature as any)?.properties || (feature as any);
+          const newHeading = payload?.heading ?? payload?.bearing;
+          if (typeof newHeading === 'number') {
+            setMapHeading(newHeading);
           }
         }}
         compassEnabled={!isMovingBearingActive}
@@ -534,48 +778,158 @@ const MapScreen = memo(function MapScreen({
           <UserLocation
             visible={true}
             renderMode={renderMode}
-            androidRenderMode={androidRenderMode}
-            showsUserHeadingIndicator={!isMovingBearingActive}
-            onUpdate={handleCameraUserLocationChange}
-          />
+            androidRenderMode={androidRenderMode as any}
+            showsUserHeadingIndicator={false}
+            onUpdate={handleCameraUserLocationChange}>
+            <View style={{ width: 0, height: 0, opacity: 0 }} />
+          </UserLocation>
         )}
 
         {/* Walking Route Polyline */}
-        {routeGeometry && (
+        {routeGeometry && routeGeometry.coordinates && routeGeometry.coordinates.length > 0 && (
           <ShapeSource
             id={routeSourceId}
-            key={routeSourceId}
             shape={{
-              type: 'Feature',
-              properties: {},
-              geometry: routeGeometry,
+              type: 'FeatureCollection',
+              features: [
+                {
+                  type: 'Feature',
+                  properties: {},
+                  geometry: routeGeometry,
+                },
+              ],
             }}
             lineMetrics={true}>
+            {/* Route Casing (Border / Shadow) to make it pop against the map */}
+            <LineLayer
+              id={`${routeLineId}-casing`}
+              belowLayerID={userLocation ? userCarLayerId : undefined}
+              style={{
+                lineColor: isRerouting ? '#b45309' : routeCasingColor,
+                lineWidth: 12,
+                lineOpacity: isRerouting ? 0.4 : 0.9,
+                lineJoin: 'round',
+                lineCap: 'round',
+              }}
+            />
+            {/* Main Route Line (Stronger and solid for high visibility) */}
             <LineLayer
               id={routeLineId}
+              belowLayerID={userLocation ? userCarLayerId : undefined}
               style={{
                 lineColor: isRerouting ? '#f59e0b' : routeColor,
-                lineWidth: 4,
-                lineOpacity: isRerouting ? 0.5 : 0.8,
-                lineDasharray: [2, 1],
+                lineWidth: 8,
+                lineOpacity: isRerouting ? 0.6 : 1.0,
+                lineJoin: 'round',
+                lineCap: 'round',
               }}
             />
           </ShapeSource>
         )}
 
+        {/* User Car Marker */}
+        {userLocation && (
+          <>
+            <Images
+              images={{ [`carMarker-${isFullscreen ? 'full' : 'norm'}`]: selectedMarkerImage }}
+            />
+            <ShapeSource
+              id={`user-car-source-${isFullscreen ? 'full' : 'norm'}`}
+              shape={{
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: {
+                      type: 'Point',
+                      coordinates: [userLocation.longitude, userLocation.latitude],
+                    },
+                    properties: {},
+                  },
+                ],
+              }}>
+              <SymbolLayer
+                id={userCarLayerId}
+                style={{
+                  iconImage: `carMarker-${isFullscreen ? 'full' : 'norm'}`,
+                  iconSize: 0.12,
+                  iconRotationAlignment: 'map',
+                  iconRotate: deviceHeading,
+                  iconAllowOverlap: true,
+                  iconIgnorePlacement: true,
+                }}
+              />
+            </ShapeSource>
+          </>
+        )}
+
         {/* Incident Destination Marker - Red */}
         {incident?.id && normalizedIncident && (
-          <PointAnnotation
-            id="destination-marker"
+          <MarkerView
             key={`destination-${incident.id}-${isDarkMode ? 'dark' : 'light'}-${isFullscreen ? 'full' : 'norm'}`}
             coordinate={[normalizedIncident.lng, normalizedIncident.lat]}
-            draggable={false}>
-            <View style={styles.incidentMarker}>
-              <Icon name="my-location" size={4} color="#fff" />
+            allowOverlap={true}
+            anchor={{ x: 0.5, y: 0.5 }}>
+            <View
+              style={{
+                width: 60,
+                height: 60,
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                zIndex: 9999,
+              }}>
+              {/* Pulsing Circle Ping — Ring 1 */}
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  width: 50,
+                  height: 50,
+                  borderRadius: 25,
+                  backgroundColor: 'rgba(239, 68, 68, 0.35)',
+                  borderWidth: 2,
+                  borderColor: '#ef4444',
+                  transform: [{ scale: pulseScale }],
+                  opacity: pulseOpacity,
+                }}
+              />
+              {/* Pulsing Circle Ping — Ring 2 (staggered) */}
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  width: 50,
+                  height: 50,
+                  borderRadius: 25,
+                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                  borderWidth: 1.5,
+                  borderColor: '#f87171',
+                  transform: [{ scale: pulseScale2 }],
+                  opacity: pulseOpacity2,
+                }}
+              />
+              <Image
+                source={require('../assets/reportMarker.gif')}
+                style={{ width: 26, height: 26, resizeMode: 'contain', zIndex: 2 }}
+              />
             </View>
-          </PointAnnotation>
+          </MarkerView>
         )}
       </MapView>
+
+      {/* Route loading spinner (center) */}
+      {isRouteLoading && !hasRouteLine && (
+        <View pointerEvents="none" style={styles.routeLoadingOverlay}>
+          <View style={[styles.routeLoadingBox, isDarkMode && styles.routeLoadingBoxDark]}>
+            <ActivityIndicator size="large" color={isDarkMode ? '#38bdf8' : '#2563eb'} />
+          </View>
+        </View>
+      )}
+
+      {!!routeError && (
+        <View style={styles.routeErrorBanner} pointerEvents="none">
+          <Text style={styles.routeErrorText}>{routeError}</Text>
+        </View>
+      )}
 
       {/* User Address Display */}
       {/* <View style={[styles.addressContainer, isDarkMode && styles.addressContainerDark]}>
@@ -604,7 +958,7 @@ const MapScreen = memo(function MapScreen({
         {/* Rerouting indicator */}
         {isRerouting && (
           <View style={styles.reroutingBanner}>
-            <Text style={styles.reroutingText}>↺  Rerouting...</Text>
+            <Text style={styles.reroutingText}>↺ Rerouting...</Text>
           </View>
         )}
 
@@ -618,7 +972,7 @@ const MapScreen = memo(function MapScreen({
         </View>
       )} */}
 
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={[
             styles.bearingButton,
             isDarkMode && styles.bearingButtonDark,
@@ -635,7 +989,7 @@ const MapScreen = memo(function MapScreen({
               <Icon name="send" size={16} color="#FFFFFF" />
             </View>
           </View>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         {/* Follow User Toggle */}
         <TouchableOpacity
@@ -647,6 +1001,38 @@ const MapScreen = memo(function MapScreen({
           onPress={handleToggleFollow}>
           <Icon name="my-location" size={20} color="#fff" />
         </TouchableOpacity>
+
+        {/* Route profile toggle buttons (Driving / foot) */}
+        {incident?.id && normalizedIncident && (
+          <View style={styles.routeProfileButtons}>
+            <TouchableOpacity
+              style={[
+                styles.routeProfileButton,
+                isDarkMode && styles.routeProfileButtonDark,
+                routeProfile === 'driving' && styles.routeProfileButtonActive,
+              ]}
+              onPress={() => handleSetRouteProfile('driving')}>
+              <Icon
+                name="car"
+                size={20}
+                color={routeProfile === 'driving' ? '#fff' : isDarkMode ? '#fff' : '#333'}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.routeProfileButton,
+                isDarkMode && styles.routeProfileButtonDark,
+                routeProfile === 'foot' && styles.routeProfileButtonActive,
+              ]}
+              onPress={() => handleSetRouteProfile('foot')}>
+              <Icon
+                name="walk"
+                size={20}
+                color={routeProfile === 'foot' ? '#fff' : isDarkMode ? '#fff' : '#333'}
+              />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Fullscreen Toggle Button */}
         {onToggleFullscreen && showFullscreenToggle && (
@@ -803,6 +1189,31 @@ const styles = StyleSheet.create({
   },
   fullscreenButtonDark: {
     backgroundColor: 'rgba(50, 50, 70, 0.9)',
+  },
+  routeProfileButtons: {
+    position: 'absolute',
+    right: 16,
+    bottom: 146, // stacked above the fullscreen button
+    gap: 10,
+  },
+  routeProfileButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  routeProfileButtonDark: {
+    backgroundColor: 'rgba(50, 50, 70, 0.9)',
+  },
+  routeProfileButtonActive: {
+    backgroundColor: '#2563eb',
   },
   routeInfo: {
     position: 'absolute',
@@ -1050,33 +1461,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  actionButtonsContainer: {
-    position: 'absolute',
-    bottom: 16,
-    left: 16,
-    right: 88,
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   reroutingBanner: {
     position: 'absolute',
     top: 60,
@@ -1096,6 +1480,51 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.3,
+  },
+  routeLoadingOverlay: {
+    position: 'absolute',
+    inset: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeLoadingBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  routeLoadingBoxDark: {
+    backgroundColor: 'rgba(15, 23, 42, 0.86)',
+  },
+  routeErrorBanner: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(239, 68, 68, 0.92)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  routeErrorText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });
 

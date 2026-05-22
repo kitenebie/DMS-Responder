@@ -3,4 +3,6 @@ export type RootStackParamList = {
   Chat: undefined;
   History: undefined;
   Report: undefined;
+  FullscreenMap: undefined;
+  MarkerSelect: undefined;
 };

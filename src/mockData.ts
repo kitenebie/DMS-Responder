@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../components/lib/axios';
 import { ip } from 'lib/Domain';
+import { getStoredUser } from '../components/lib/auth';
 import {
   Incident,
   HistoricalIncident,
@@ -131,11 +132,10 @@ export const declineIncident = async (
 
 export const fetchIncomingIncident = async (): Promise<Incident> => {
   try {
-    // Get user data from AsyncStorage to verify
-    const userData = await AsyncStorage.getItem('user');
+    // Get user data from Cache/AsyncStorage to verify
+    const parsedUser = await getStoredUser();
 
-    if (userData) {
-      const parsedUser = JSON.parse(userData);
+    if (parsedUser) {
       console.log('user data stored:', parsedUser.user);
 
       // Make API call and properly return the transformed data

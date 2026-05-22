@@ -15,8 +15,10 @@ export interface RouteStep {
 interface RouteState {
   routeGeometry: RouteGeometry | null;
   routeSteps: RouteStep[];
+  routeProfile: 'driving' | 'foot';
   isRouteLoading: boolean;
   error: string | null;
+  setRouteProfile: (profile: 'driving' | 'foot') => void;
   fetchRoute: (params: {
     userLat: number;
     userLng: number;
@@ -26,15 +28,18 @@ interface RouteState {
   clearRoute: () => void;
 }
 
-export const useRouteStore = create<RouteState>((set) => ({
+export const useRouteStore = create<RouteState>((set, get) => ({
   routeGeometry: null,
   routeSteps: [],
+  routeProfile: 'driving',
   isRouteLoading: false,
   error: null,
+  setRouteProfile: (routeProfile) => set({ routeProfile }),
   fetchRoute: async ({ userLat, userLng, destLat, destLng }) => {
     set({ isRouteLoading: true, error: null });
     try {
-      const url = `https://router.project-osrm.org/route/v1/foot/${userLng},${userLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`;
+      const profile = get().routeProfile;
+      const url = `https://router.project-osrm.org/route/v1/${profile}/${userLng},${userLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=true`;
       const response = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json' },

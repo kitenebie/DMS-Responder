@@ -26,6 +26,8 @@ interface MapProps {
   containerStyle?: StyleProp<ViewStyle>;
   isMovingBearingEnabled?: boolean;
   onMovingBearingChange?: (enabled: boolean) => void;
+  isActive?: boolean;
+  markerKey?: string | null;
 }
 
 const MAPLIBRE_NATIVE_MODULE_NAME = 'MLRNModule';
@@ -72,6 +74,8 @@ export const Map: React.FC<MapProps> = ({
   containerStyle,
   isMovingBearingEnabled: isMovingBearingEnabledProp,
   onMovingBearingChange,
+  isActive = true,
+  markerKey,
 }) => {
   const [isMovingBearingEnabledLocal, setIsMovingBearingEnabledLocal] = useState(false);
   const isMovingBearingEnabled = isMovingBearingEnabledProp ?? isMovingBearingEnabledLocal;
@@ -127,6 +131,8 @@ export const Map: React.FC<MapProps> = ({
             showFullscreenToggle={showFullscreenToggle}
             isMovingBearingEnabled={isMovingBearingEnabled}
             onMovingBearingChange={setIsMovingBearingEnabled}
+            isActive={isActive}
+            markerKey={markerKey}
           />
         </View>
       ) : (
