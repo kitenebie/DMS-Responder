@@ -400,7 +400,7 @@ const AppContent = () => {
       }
       stopLocationUpdates();
     };
-  }, [isLoggedIn, trackerCurrentStatus, state.activeIncident?.id]);
+  }, [isLoggedIn, trackerCurrentStatus, state.activeIncident?.id, currentUserId]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
