@@ -85,14 +85,15 @@ export const login = async (email: string, password: string, rememberMe: boolean
 
     if (fcmToken) {
       try {
-        await FirebaseNotificationService.syncToken(userData.user?.email ?? email, fcmToken);
+        // Fire and forget to avoid blocking the login flow (especially if endpoint times out)
+        void FirebaseNotificationService.syncToken(userData.user?.email ?? email, fcmToken);
         userData.user = {
           ...userData.user,
           FCM: fcmToken,
         };
         await AsyncStorage.setItem('user', JSON.stringify(userData));
       } catch (error) {
-        console.log('Failed to sync FCM token after login:', error);
+        console.log('Failed to save FCM token locally after login:', error);
       }
     }
 
@@ -194,7 +195,7 @@ export const refreshLogin = async () => {
       await AsyncStorage.setItem('refresh_token', userData.refresh_token);
     }
     if (fcmToken) {
-      await FirebaseNotificationService.syncToken(userData.user?.email, fcmToken);
+      void FirebaseNotificationService.syncToken(userData.user?.email, fcmToken);
     }
     console.log('Refresh login successful');
     return userData;
