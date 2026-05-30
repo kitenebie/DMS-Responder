@@ -110,6 +110,18 @@ const AppContent = () => {
   const [isMapInteracting, setIsMapInteracting] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [trackerCurrentStatus, setTrackerCurrentStatus] = useState<IncidentStatus>('Active');
+  const [isLocationSynced, setIsLocationSynced] = useState(false);
+
+  // Graceful fallback: If location doesn't sync within 6 seconds, proceed anyway
+  useEffect(() => {
+    if (isLoggedIn && !isLocationSynced) {
+      const timer = setTimeout(() => {
+        console.warn('[Location] Sync timeout reached. Proceeding to app.');
+        setIsLocationSynced(true);
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoggedIn, isLocationSynced]);
   const overlayPermissionPromptShownRef = useRef(false);
   const locationPermissionPromptShownRef = useRef(false);
   const stateRef = useRef(state);
@@ -380,9 +392,12 @@ const AppContent = () => {
         //   { repeat: false },
         //   hasValidReportId ? Number(reportIdValue) : undefined
         // );
-        // Save location to Firebase Realtime Database (non-blocking)
+        // Save location to Firebase Realtime Database and set sync status
         if (currentUserId) {
-          void saveResponderLocation(currentUserId, location.latitude, location.longitude);
+          const success = await saveResponderLocation(currentUserId, location.latitude, location.longitude);
+          if (success && isMounted) {
+            setIsLocationSynced(true);
+          }
         }
       } catch (error) {
         console.log('[Location] Failed to send location:', error);
@@ -646,6 +661,7 @@ const AppContent = () => {
     setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
     const savedMarker = await AsyncStorage.getItem(ASYNC_STORAGE_MARKER_KEY);
     setSelectedMarkerKey(savedMarker);
+    setIsLocationSynced(false);
     setIsLoggedIn(true);
   }, [resolveUserName]);
 
@@ -671,6 +687,7 @@ const AppContent = () => {
     setIsNavigationReady(false);
     setUserName(DEFAULT_CONFIG.responder_name);
     setCurrentUserId(null);
+    setIsLocationSynced(false);
   }, [resetIncidentState]);
 
   const cancelLogout = useCallback(() => {
@@ -981,6 +998,26 @@ const AppContent = () => {
     return (
       <ThemeProvider>
         <LoginForm onLogin={handleLogin} isDarkMode={isDarkMode} />
+      </ThemeProvider>
+    );
+  }
+
+  // Show loading screen if logged in but location has not successfully synced to Firebase yet
+  if (isLoggedIn && !isLocationSynced) {
+    return (
+      <ThemeProvider>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC',
+          }}>
+          <ActivityIndicator size="large" color={DEFAULT_CONFIG.primary_color} />
+          <Text style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A', marginTop: 16, fontWeight: 'bold' }}>
+            Syncing location to Firebase...
+          </Text>
+        </View>
       </ThemeProvider>
     );
   }

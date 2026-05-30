@@ -82,17 +82,17 @@ export const saveResponderLocation = async (
   userId: number,
   latitude: number,
   longitude: number
-): Promise<void> => {
+): Promise<boolean> => {
   if (locationWriteBlocked) {
-    return;
+    return false;
   }
 
   const responderId = asResponderId(userId);
   if (!responderId) {
-    return;
+    return false;
   }
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    return;
+    return false;
   }
 
   const updatedAt = new Date().toISOString();
@@ -144,6 +144,7 @@ export const saveResponderLocation = async (
         ', lng=' +
         longitude
     );
+    return true;
   } catch (error) {
     if (isPermissionDenied(error)) {
       locationWriteBlocked = true;
@@ -153,7 +154,7 @@ export const saveResponderLocation = async (
           '[FirebaseLocation] RTDB write denied by rules (401/403). Pausing further RTDB writes until app restart.'
         );
       }
-      return;
+      return false;
     } else if (isNativeRtdbUnavailable(error)) {
       nativeRtdbWriteUnavailable = true;
       if (!hasLoggedRestFallback) {
@@ -162,7 +163,7 @@ export const saveResponderLocation = async (
           '[FirebaseLocation] RTDB native module is unavailable. Falling back to REST writes.'
         );
       }
-      return;
+      return false;
     } else {
       console.warn(
         '[FirebaseLocation] Failed to update location in RTDB: userId=' +
@@ -173,6 +174,7 @@ export const saveResponderLocation = async (
           longitude,
         error
       );
+      return false;
     }
   }
 };
