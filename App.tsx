@@ -34,7 +34,7 @@ import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
 import { navigationRef, navigate } from './components/lib/NavigationService';
 import { getCredentials, login, logout } from './components/lib/auth';
-import { stopLocationUpdates } from './components/lib/axios';
+import { sendLocation, stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import { MarkerSelectScreen, ASYNC_STORAGE_MARKER_KEY, type MarkerKey } from './components/MarkerSelectScreen';
 import {
@@ -385,13 +385,17 @@ const AppContent = () => {
       try {
         const location = await locationService.getCurrentLocation(true);
         if (!isMounted) return;
-        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude);
-        // Temporarily disabled server location updates.
-        // await sendLocation(
-        //   { lat: location.latitude, lng: location.longitude },
-        //   { repeat: false },
-        //   hasValidReportId ? Number(reportIdValue) : undefined
-        // );
+        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude + ', heading=' + (location.heading ?? 'N/A'));
+        // Send location coordinates to the Laravel server
+        await sendLocation(
+          { 
+            lat: location.latitude, 
+            lng: location.longitude,
+            degree: location.heading
+          },
+          { repeat: false },
+          hasValidReportId ? Number(reportIdValue) : undefined
+        );
         // Save location to Firebase Realtime Database and set sync status
         if (currentUserId) {
           const success = await saveResponderLocation(currentUserId, location.latitude, location.longitude);

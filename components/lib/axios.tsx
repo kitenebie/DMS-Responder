@@ -91,6 +91,7 @@ export const submitReportForm = async (reportForm: ReportForm, photoUri?: string
 interface LocationPayload {
   lat: number;
   lng: number;
+  degree?: number;
 }
 
 let locationInterval: ReturnType<typeof setInterval> | null = null;
@@ -99,11 +100,15 @@ const sendLocationOnce = async (
   location: LocationPayload,
   reportId?: string | number | null
 ): Promise<boolean> => {
-  console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}`);
+  console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}, degree=${location.degree ?? 'N/A'}`);
   const payload: Record<string, any> = {
     lat: location.lat,
     lng: location.lng,
   };
+
+  if (location.degree !== undefined && location.degree !== null) {
+    payload.degree = location.degree;
+  }
 
   if (reportId !== undefined && reportId !== null && String(reportId).trim() !== '') {
     payload.report_id = reportId;
