@@ -22,7 +22,6 @@ interface ChatScreenProps {
   messages: ChatMessage[];
   onBack: () => void;
   onSendMessage: (message: string, images: string[]) => Promise<void> | void;
-  onResendMessage?: (msg: ChatMessage) => void;
   isDarkMode: boolean;
   readOnly?: boolean;
   chatTabs?: { key: 'dispatcher' | 'citizen'; label: string }[];
@@ -36,7 +35,6 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   messages,
   onBack,
   onSendMessage,
-  onResendMessage,
   isDarkMode,
   readOnly = false,
   chatTabs,
@@ -257,20 +255,10 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   {msg.isUser && (
                     <View style={styles.statusRow}>
                       {msg.status === 'failed' ? (
-                        <View style={styles.failedRow}>
+                        <>
                           <Icon name="warning" size={12} color="#F87171" />
                           <Text style={[styles.statusText, { color: '#F87171' }]}>Not sent</Text>
-                          {onResendMessage && (
-                            <TouchableOpacity
-                              onPress={() => onResendMessage(msg)}
-                              style={styles.resendClick}>
-                              <Icon name="refresh" size={10} color="#BFDBFE" />
-                              <Text style={[styles.statusText, { color: '#BFDBFE', textDecorationLine: 'underline' }]}>
-                                Resend
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
+                        </>
                       ) : msg.status === 'sending' ? (
                         <>
                           <Icon name="time" size={12} color="#FBBF24" />
@@ -497,21 +485,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     marginTop: 4,
-  },
-  failedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  resendClick: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    marginLeft: 8,
-    paddingVertical: 2,
-    paddingHorizontal: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 4,
   },
   statusText: {
     fontSize: 10,

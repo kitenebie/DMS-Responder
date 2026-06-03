@@ -34,7 +34,7 @@ import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
 import { navigationRef, navigate } from './components/lib/NavigationService';
 import { getCredentials, login, logout } from './components/lib/auth';
-import { sendLocation, stopLocationUpdates } from './components/lib/axios';
+import { stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import { MarkerSelectScreen, ASYNC_STORAGE_MARKER_KEY, type MarkerKey } from './components/MarkerSelectScreen';
 import {
@@ -385,17 +385,13 @@ const AppContent = () => {
       try {
         const location = await locationService.getCurrentLocation(true);
         if (!isMounted) return;
-        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude + ', heading=' + (location.heading ?? 'N/A'));
-        // Send location coordinates to the Laravel server
-        await sendLocation(
-          { 
-            lat: location.latitude, 
-            lng: location.longitude,
-            degree: location.heading
-          },
-          { repeat: false },
-          hasValidReportId ? Number(reportIdValue) : undefined
-        );
+        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude);
+        // Temporarily disabled server location updates.
+        // await sendLocation(
+        //   { lat: location.latitude, lng: location.longitude },
+        //   { repeat: false },
+        //   hasValidReportId ? Number(reportIdValue) : undefined
+        // );
         // Save location to Firebase Realtime Database and set sync status
         if (currentUserId) {
           const success = await saveResponderLocation(currentUserId, location.latitude, location.longitude);
@@ -742,7 +738,7 @@ const AppContent = () => {
       const receiverId =
         conversationTarget === 'dispatcher'
           ? state.activeIncident?.dispatcher_id ?? undefined
-          : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? undefined;
+          : state.activeIncident?.citizen_id ?? undefined;
       const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const tempIds: number[] = [];
 
@@ -819,26 +815,13 @@ const AppContent = () => {
           });
         }
 
-        try {
-          const updatedChats = await fetchChatMessages(String(reportIdNum));
-          setState((prev) => ({
-            ...prev,
-            chatMessages: updatedChats.map((chat) =>
-              chat.isUser ? { ...chat, status: 'sent' } : chat
-            ),
-          }));
-        } catch (refreshErr) {
-          // Refresh failed but message was sent — just mark optimistic messages as sent
-          console.log('[handleSendMessage] Chat refresh failed after send (non-fatal):', refreshErr);
-          if (tempIds.length > 0) {
-            setState((prev) => ({
-              ...prev,
-              chatMessages: prev.chatMessages.map((msg) =>
-                tempIds.includes(msg.id) ? { ...msg, status: 'sent' } : msg
-              ),
-            }));
-          }
-        }
+        const updatedChats = await fetchChatMessages(String(reportIdNum));
+        setState((prev) => ({
+          ...prev,
+          chatMessages: updatedChats.map((chat) =>
+            chat.isUser ? { ...chat, status: 'sent' } : chat
+          ),
+        }));
       } catch (err) {
         console.warn('Failed to send message:', err);
         if (tempIds.length > 0) {
@@ -854,21 +837,6 @@ const AppContent = () => {
     },
     [currentUserId, state.activeChatTab, state.activeIncident]
   );
-
-  const handleResendMessage = useCallback(
-    async (failedMsg: ChatMessage) => {
-      // Remove failed message from state
-      setState((prev) => ({
-        ...prev,
-        chatMessages: prev.chatMessages.filter((msg) => msg.id !== failedMsg.id),
-      }));
-
-      // Retry sending message
-      await handleSendMessage(failedMsg.message, failedMsg.image ? [failedMsg.image] : []);
-    },
-    [handleSendMessage]
-  );
-
   const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
     setState((prev) => ({
       ...prev,
@@ -1405,7 +1373,6 @@ const AppContent = () => {
                 }
                 activeChatTab={chatScreenMode === 'live' ? state.activeChatTab ?? 'citizen' : undefined}
                 onChangeChatTab={chatScreenMode === 'live' ? handleChangeChatTab : undefined}
-                onResendMessage={handleResendMessage}
                 title={chatScreenTitle}
                 subtitle={chatScreenSubtitle}
               />

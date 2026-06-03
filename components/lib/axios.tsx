@@ -5,7 +5,7 @@ import { ReportForm } from '@/types';
 
 const api = axios.create({
   baseURL: ip,
-  timeout: 30000, // Increased to 30s for image uploads and slow connections
+  timeout: 10000,
   headers: {
     'Content-Type': 'application/json; charset=utf-8',
     Accept: 'application/json',
@@ -91,7 +91,6 @@ export const submitReportForm = async (reportForm: ReportForm, photoUri?: string
 interface LocationPayload {
   lat: number;
   lng: number;
-  degree?: number;
 }
 
 let locationInterval: ReturnType<typeof setInterval> | null = null;
@@ -100,15 +99,11 @@ const sendLocationOnce = async (
   location: LocationPayload,
   reportId?: string | number | null
 ): Promise<boolean> => {
-  console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}, degree=${location.degree ?? 'N/A'}`);
+  console.log(`[Location] Sending location to server: lat=${location.lat}, lng=${location.lng}`);
   const payload: Record<string, any> = {
     lat: location.lat,
     lng: location.lng,
   };
-
-  if (location.degree !== undefined && location.degree !== null) {
-    payload.degree = location.degree;
-  }
 
   if (reportId !== undefined && reportId !== null && String(reportId).trim() !== '') {
     payload.report_id = reportId;
