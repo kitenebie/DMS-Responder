@@ -738,7 +738,7 @@ const AppContent = () => {
       const receiverId =
         conversationTarget === 'dispatcher'
           ? state.activeIncident?.dispatcher_id ?? undefined
-          : state.activeIncident?.citizen_id ?? undefined;
+          : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? undefined;
       const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const tempIds: number[] = [];
 
@@ -815,13 +815,26 @@ const AppContent = () => {
           });
         }
 
-        const updatedChats = await fetchChatMessages(String(reportIdNum));
-        setState((prev) => ({
-          ...prev,
-          chatMessages: updatedChats.map((chat) =>
-            chat.isUser ? { ...chat, status: 'sent' } : chat
-          ),
-        }));
+        try {
+          const updatedChats = await fetchChatMessages(String(reportIdNum));
+          setState((prev) => ({
+            ...prev,
+            chatMessages: updatedChats.map((chat) =>
+              chat.isUser ? { ...chat, status: 'sent' } : chat
+            ),
+          }));
+        } catch (refreshErr) {
+          // Refresh failed but message was sent — just mark optimistic messages as sent
+          console.log('[handleSendMessage] Chat refresh failed after send (non-fatal):', refreshErr);
+          if (tempIds.length > 0) {
+            setState((prev) => ({
+              ...prev,
+              chatMessages: prev.chatMessages.map((msg) =>
+                tempIds.includes(msg.id) ? { ...msg, status: 'sent' } : msg
+              ),
+            }));
+          }
+        }
       } catch (err) {
         console.warn('Failed to send message:', err);
         if (tempIds.length > 0) {
@@ -837,6 +850,21 @@ const AppContent = () => {
     },
     [currentUserId, state.activeChatTab, state.activeIncident]
   );
+
+  const handleResendMessage = useCallback(
+    async (failedMsg: ChatMessage) => {
+      // Remove failed message from state
+      setState((prev) => ({
+        ...prev,
+        chatMessages: prev.chatMessages.filter((msg) => msg.id !== failedMsg.id),
+      }));
+
+      // Retry sending message
+      await handleSendMessage(failedMsg.message, failedMsg.image ? [failedMsg.image] : []);
+    },
+    [handleSendMessage]
+  );
+
   const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
     setState((prev) => ({
       ...prev,
@@ -1373,6 +1401,7 @@ const AppContent = () => {
                 }
                 activeChatTab={chatScreenMode === 'live' ? state.activeChatTab ?? 'citizen' : undefined}
                 onChangeChatTab={chatScreenMode === 'live' ? handleChangeChatTab : undefined}
+                onResendMessage={handleResendMessage}
                 title={chatScreenTitle}
                 subtitle={chatScreenSubtitle}
               />

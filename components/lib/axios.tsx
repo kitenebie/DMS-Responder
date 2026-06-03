@@ -5,7 +5,7 @@ import { ReportForm } from '@/types';
 
 const api = axios.create({
   baseURL: ip,
-  timeout: 10000,
+  timeout: 30000, // Increased to 30s for image uploads and slow connections
   headers: {
     'Content-Type': 'application/json; charset=utf-8',
     Accept: 'application/json',

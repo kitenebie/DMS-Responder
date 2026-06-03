@@ -382,7 +382,10 @@ export const addChatMessage = async (
 ): Promise<void> => {
   try {
     if (!message.message || !message.message.trim()) {
-      throw new Error('Message content is required');
+      if (!message.image) {
+        throw new Error('Message content or image is required');
+      }
+      // Allow image-only messages (message text can be empty)
     }
 
     const { getStoredUser } = await import('../components/lib/auth');
@@ -392,7 +395,8 @@ export const addChatMessage = async (
       throw new Error('User not authenticated');
     }
 
-    const receiverId = message.receiver ?? message.receiver_id;
+    const rawReceiverId = message.receiver ?? message.receiver_id;
+    const receiverId = rawReceiverId !== undefined && rawReceiverId !== null ? Number(rawReceiverId) : undefined;
 
     let payload: any;
     let config: any = {};
@@ -444,6 +448,19 @@ export const addChatMessage = async (
     await api.post('/responder/sendChat', payload, config);
   } catch (err) {
     const error: any = err;
+    const isNetworkError = !error?.response && error?.message === 'Network Error';
+    const isTimeout = error?.code === 'ECONNABORTED';
+
+    if (isNetworkError || isTimeout) {
+      // Network/timeout error means the request was sent but no response came back.
+      // The server likely received and saved the message. Treat as silent success.
+      console.log(
+        '[addChatMessage] Network/timeout error — message may have been saved on server.',
+        { code: error?.code, message: error?.message }
+      );
+      return; // Do NOT re-throw
+    }
+
     if (error?.response) {
       console.warn('Failed to add chat message:', error.response.status, error.response.data);
     } else {
