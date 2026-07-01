@@ -1,1 +1,1 @@
-export const ip = 'https://irosincommandcenter.site';
+export const ip = 'https://earms.online';
