@@ -61,6 +61,7 @@ import {
   startOverlayLocationService,
   stopOverlayLocationService,
   isOverlayLocationServiceRunning,
+  setOverlayBubbleVisible,
 } from './components/services/OverlayLocationService';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import FirebaseNotificationService from './services/FirebaseNotificationService';
@@ -233,10 +234,22 @@ const AppContent = () => {
         return;
       }
 
+      if (nextState === 'active') {
+        // App came to foreground — ensure service is running but hide the bubble
+        const isRunning = await isOverlayLocationServiceRunning();
+        if (!isRunning) {
+          await startOverlayLocationService();
+        }
+        await setOverlayBubbleVisible(false);
+        return;
+      }
+
+      // App went to background/inactive — ensure service is running and show bubble
       const isRunning = await isOverlayLocationServiceRunning();
       if (!isRunning) {
         await startOverlayLocationService();
       }
+      await setOverlayBubbleVisible(true);
     },
     [isLoggedIn]
   );
@@ -377,44 +390,42 @@ const AppContent = () => {
 
     let isMounted = true;
     let intervalId: ReturnType<typeof setInterval> | null = null;
-    let isSending = false;
 
-    const sendCurrentLocation = async () => {
-      if (isSending || !isMounted) return;
-      isSending = true;
-      try {
-        const location = await locationService.getCurrentLocation(true);
-        if (!isMounted) return;
-        console.log('[Location] Current location captured: lat=' + location.latitude + ', lng=' + location.longitude);
-        // Temporarily disabled server location updates.
-        // await sendLocation(
-        //   { lat: location.latitude, lng: location.longitude },
-        //   { repeat: false },
-        //   hasValidReportId ? Number(reportIdValue) : undefined
-        // );
-        // Save location to Firebase Realtime Database and set sync status
-        if (currentUserId) {
-          const success = await saveResponderLocation(currentUserId, location.latitude, location.longitude);
-          if (success && isMounted) {
-            setIsLocationSynced(true);
-          }
+    // Keep a cached location that the watcher updates continuously
+    let cachedLat = 0;
+    let cachedLng = 0;
+    let hasLocation = false;
+
+    // Start watching — this updates cachedLat/Lng every ~1s from GPS hardware
+    let watchSub: { remove: () => void } | null = null;
+    locationService.watchPosition(
+      (loc) => {
+        cachedLat = loc.latitude;
+        cachedLng = loc.longitude;
+        hasLocation = true;
+        if (isMounted && !isLocationSynced) {
+          setIsLocationSynced(true);
         }
-      } catch (error) {
-        console.log('[Location] Failed to send location:', error);
-      } finally {
-        isSending = false;
-      }
-    };
+      },
+      (err) => console.log('[Location] Watch error:', err)
+    ).then((sub) => {
+      if (isMounted) watchSub = sub;
+      else sub?.remove();
+    });
 
-    sendCurrentLocation();
-    intervalId = setInterval(sendCurrentLocation, 500);
+    // Fire-and-forget interval — NEVER awaits, NEVER blocks
+    intervalId = setInterval(() => {
+      if (!isMounted || !hasLocation || !currentUserId) return;
+      // Fire and forget — no await, no isSending lock
+      saveResponderLocation(currentUserId, cachedLat, cachedLng).catch(() => {});
+    }, 1000);
 
     return () => {
       isMounted = false;
+      watchSub?.remove();
       if (intervalId) {
         clearInterval(intervalId);
       }
-      stopLocationUpdates();
     };
   }, [isLoggedIn, trackerCurrentStatus, state.activeIncident?.id, currentUserId]);
 

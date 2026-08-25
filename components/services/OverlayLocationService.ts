@@ -8,7 +8,9 @@ type OverlayStartPayload = {
   baseUrl: string;
   token: string;
   userId: number;
+  firebaseUrl: string;
 };
+
 
 type OverlayNativeModule = {
   isOverlayPermissionGranted: () => Promise<boolean>;
@@ -26,6 +28,9 @@ const isAndroid = Platform.OS === 'android';
 const readOverlayConfig = async (): Promise<{ token: string; userId: number }> => {
   try {
     const storedUser = await AsyncStorage.getItem('user');
+    // Also check the standalone 'token' key used by axios interceptor
+    const standaloneToken = await AsyncStorage.getItem('token');
+
     if (!storedUser) {
       return { token: '', userId: 0 };
     }
@@ -33,6 +38,7 @@ const readOverlayConfig = async (): Promise<{ token: string; userId: number }> =
     const parsed = JSON.parse(storedUser);
     const token =
       parsed?.token ??
+      standaloneToken ??
       parsed?.access_token ??
       parsed?.user?.token ??
       parsed?.user?.access_token ??
@@ -95,10 +101,29 @@ export const startOverlayLocationService = async (): Promise<OverlayStatus> => {
     }
 
     const config = await readOverlayConfig();
+
+    // Get Firebase databaseURL — try multiple sources
+    let firebaseUrl = '';
+    try {
+      const { getApp } = require('@react-native-firebase/app');
+      firebaseUrl = getApp()?.options?.databaseURL ?? '';
+    } catch (e) {
+      console.warn('[OverlayLocation] Failed to get Firebase databaseURL from SDK:', e);
+    }
+
+    // Fallback: hardcoded from google-services.json
+    if (!firebaseUrl) {
+      firebaseUrl = 'https://notification-app-c4e8e-default-rtdb.asia-southeast1.firebasedatabase.app';
+      console.warn('[OverlayLocation] Using hardcoded Firebase RTDB URL fallback.');
+    }
+
+    console.log('[OverlayLocation] Starting with: userId=' + config.userId + ', token=' + (config.token ? 'present' : 'EMPTY') + ', firebaseUrl=' + (firebaseUrl ? 'present' : 'EMPTY'));
+
     await overlayModule!.startOverlay({
       baseUrl: ip,
       token: config.token,
       userId: config.userId,
+      firebaseUrl,
     });
     return 'started';
   } catch (error) {
