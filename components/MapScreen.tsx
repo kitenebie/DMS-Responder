@@ -7,58 +7,35 @@ import {
   Image,
   Animated,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Incident } from '../src/types';
 import { getMarkerImage } from './MarkerSelectScreen';
 import {
   MapView,
   UserLocation,
   Camera,
-  type CameraRef,
   MarkerView,
   ShapeSource,
+  type ShapeSourceRef,
   LineLayer,
   UserTrackingMode,
   Images,
   SymbolLayer,
+  Logger,
 } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
 import { locationService, type LocationCoords } from './services/locationService';
 import { useRouteStore } from './routeStore';
 import { Icon } from './Icon';
+import {
+  loadLatestOpenFreeMapLightStyle,
+  OPEN_FREE_MAP_LIGHT_STYLE,
+  OPEN_STREET_MAP_FALLBACK_STYLE,
+} from './mapStyles';
 
-const createRasterMapStyle = (
-  sourceId: string,
-  layerId: string,
-  tiles: string[],
-  maxzoom?: number
-) => ({
-  version: 8,
-  sources: {
-    [sourceId]: {
-      type: 'raster',
-      tiles,
-      tileSize: 256,
-      ...(typeof maxzoom === 'number' ? { maxzoom } : {}),
-    },
-  },
-  layers: [
-    {
-      id: layerId,
-      type: 'raster',
-      source: sourceId,
-      minzoom: 0,
-    },
-  ],
-});
-
-// Free raster basemaps for the responder map (no API key required)
-const OPEN_STREET_MAP_STYLE = createRasterMapStyle(
-  'osm',
-  'osm-basemap',
-  ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-  19
-);
+let lastMapNetworkTimeoutLogMs = 0;
 
 // OSM Nominatim API for reverse geocoding
 const OSM_REVERSE_GEOCODE_URL = 'https://nominatim.openstreetmap.org/reverse';
@@ -74,14 +51,14 @@ interface MapScreenProps {
   showFullscreenToggle?: boolean;
   isMovingBearingEnabled?: boolean;
   onMovingBearingChange?: (enabled: boolean) => void;
+  isFollowingUser?: boolean;
+  onFollowingUserChange?: (following: boolean) => void;
   markerKey?: string | null;
 }
 
-interface RouteStep {
-  location: [number, number];
-  instruction?: string;
-  modifier?: string;
-  type?: string;
+interface RouteGeometry {
+  type: 'LineString';
+  coordinates: [number, number][];
 }
 
 const isValidLatLng = (lat: number, lng: number) =>
@@ -103,13 +80,6 @@ const normalizeIncidentCoords = (coords?: { lat: number; lng: number } | null) =
     return { lat: lng, lng: lat };
   }
   return null;
-};
-
-const getCompassDirection = (heading: number) => {
-  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const normalizedHeading = ((heading % 360) + 360) % 360;
-  const index = Math.round(normalizedHeading / 45) % 8;
-  return directions[index];
 };
 
 const toRadians = (deg: number) => (deg * Math.PI) / 180;
@@ -169,10 +139,59 @@ const distanceToPolyline = (point: [number, number], polyline: [number, number][
   return minDist;
 };
 
+/**
+ * Keeps the visible portion of the route anchored to the responder's latest
+ * position. The full OSRM route stays in the store for navigation/rerouting,
+ * while the already-travelled part is removed from what we draw on the map.
+ */
+const trimRouteToCurrentLocation = (
+  route: RouteGeometry,
+  location: LocationCoords
+): RouteGeometry => {
+  const coordinates = route.coordinates;
+  if (coordinates.length < 2) return route;
+
+  const point: [number, number] = [location.longitude, location.latitude];
+  let closestSegmentIndex = 0;
+  let closestDistance = Infinity;
+
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const [ax, ay] = coordinates[index];
+    const [bx, by] = coordinates[index + 1];
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const progress =
+      lengthSquared > 0
+        ? Math.max(0, Math.min(1, ((point[0] - ax) * dx + (point[1] - ay) * dy) / lengthSquared))
+        : 0;
+    const closestPoint: [number, number] = [ax + progress * dx, ay + progress * dy];
+    const distance = distanceMeters(point, closestPoint);
+
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestSegmentIndex = index;
+    }
+  }
+
+  return {
+    type: 'LineString',
+    // Use the GPS point as the first vertex so the line stays visually joined
+    // to the marker between route refreshes.
+    coordinates: [point, ...coordinates.slice(closestSegmentIndex + 1)],
+  };
+};
+
 // How far (meters) off-route before triggering a reroute
 const OFF_ROUTE_THRESHOLD_M = 35;
 // How many consecutive off-route checks before actually rerouting (avoids GPS jitter false positives)
 const OFF_ROUTE_CONSECUTIVE_CHECKS = 3;
+const LOCATION_STATE_UPDATE_INTERVAL_MS = 200;
+const LOCATION_UPLOAD_INTERVAL_MS = 3_000;
+const HEADING_UPDATE_INTERVAL_MS = 150;
+const HEADING_IDLE_UPDATE_INTERVAL_MS = 1_000;
+
+const headingDelta = (a: number, b: number) => Math.abs(((a - b + 540) % 360) - 180);
 
 const MapScreen = memo(function MapScreen({
   onMapPress,
@@ -185,31 +204,71 @@ const MapScreen = memo(function MapScreen({
   showFullscreenToggle = true,
   isMovingBearingEnabled: isMovingBearingEnabledProp,
   onMovingBearingChange,
+  isFollowingUser: isFollowingUserProp,
+  onFollowingUserChange,
   markerKey,
 }: MapScreenProps) {
+  const insets = useSafeAreaInsets();
+  const fullscreenBottomInset = isFullscreen ? Math.max(insets.bottom, 16) : 0;
   const selectedMarkerImage = getMarkerImage(markerKey);
+  const responderMarkerImageName = `responder-marker-${markerKey ?? 'default'}`;
+  // Keep this object stable while the marker's coordinates animate. Re-creating
+  // it every frame makes MapLibre re-register the image and can leave the icon
+  // on its empty loading placeholder.
+  const responderMarkerImages = useMemo(
+    () => ({ [responderMarkerImageName]: selectedMarkerImage }),
+    [responderMarkerImageName, selectedMarkerImage]
+  );
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim2 = useRef(new Animated.Value(0)).current;
 
-  // Destination marker radar pulse ping animation (JS driver - required inside MarkerView)
   useEffect(() => {
-    Animated.loop(
+    Logger.setLogCallback((log) => {
+      const isTransientMapNetworkTimeout =
+        log.level === 'error' &&
+        (/failed to load tile.*timeout/i.test(log.message) ||
+          /\[Setup\]: loading style failed: timeout/i.test(log.message));
+      if (!isTransientMapNetworkTimeout) return false;
+
+      const now = Date.now();
+      if (__DEV__ && now - lastMapNetworkTimeoutLogMs >= 30_000) {
+        lastMapNetworkTimeoutLogMs = now;
+        console.log('[Map] Map network timeout; continuing with the local style/fallback.');
+      }
+      return true;
+    });
+  }, []);
+
+  // Keep the destination pulse on the native UI thread and clean it up when
+  // switching between embedded/fullscreen maps.
+  useEffect(() => {
+    const firstPulse = Animated.loop(
       Animated.timing(pulseAnim, {
         toValue: 1,
         duration: 1800,
-        useNativeDriver: false,
+        useNativeDriver: true,
       })
-    ).start();
-    // Second ring starts delayed for a staggered radar effect
-    setTimeout(() => {
-      Animated.loop(
-        Animated.timing(pulseAnim2, {
-          toValue: 1,
-          duration: 1800,
-          useNativeDriver: false,
-        })
-      ).start();
+    );
+    const secondPulse = Animated.loop(
+      Animated.timing(pulseAnim2, {
+        toValue: 1,
+        duration: 1800,
+        useNativeDriver: true,
+      })
+    );
+
+    firstPulse.start();
+    const secondPulseTimer = setTimeout(() => {
+      secondPulse.start();
     }, 900);
+
+    return () => {
+      clearTimeout(secondPulseTimer);
+      firstPulse.stop();
+      secondPulse.stop();
+      pulseAnim.setValue(0);
+      pulseAnim2.setValue(0);
+    };
   }, [pulseAnim, pulseAnim2]);
 
   const pulseScale = pulseAnim.interpolate({
@@ -235,6 +294,8 @@ const MapScreen = memo(function MapScreen({
   const [, setUserAddress] = useState<string>('Getting location...');
   const [hasLocationPermission, setHasLocationPermission] = useState(false);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
+  const [useFallbackMapStyle, setUseFallbackMapStyle] = useState(false);
+  const [openFreeMapStyle, setOpenFreeMapStyle] = useState<object>(OPEN_FREE_MAP_LIGHT_STYLE);
   const routeGeometry = useRouteStore((state) => state.routeGeometry);
   const routeSteps = useRouteStore((state) => state.routeSteps);
   const isRouteLoading = useRouteStore((state) => state.isRouteLoading);
@@ -244,17 +305,17 @@ const MapScreen = memo(function MapScreen({
   const fetchRoute = useRouteStore((state) => state.fetchRoute);
   const clearRoute = useRouteStore((state) => state.clearRoute);
   const [routeVersion, setRouteVersion] = useState<number>(0);
-  const [isFollowingUser, setIsFollowingUser] = useState<boolean>(true);
+  const [isFollowingUserLocal, setIsFollowingUserLocal] = useState<boolean>(true);
   const [isMovingBearingEnabledLocal, setIsMovingBearingEnabledLocal] = useState<boolean>(false);
   const isMovingBearingEnabled = isMovingBearingEnabledProp ?? isMovingBearingEnabledLocal;
+  const isFollowingUser = isFollowingUserProp ?? isFollowingUserLocal;
+  const setIsFollowingUser = onFollowingUserChange ?? setIsFollowingUserLocal;
   const isMovingBearingActive = isMovingBearingEnabled && isFollowingUser && hasLocationPermission;
   const [arrivalAlertIncidentId, setArrivalAlertIncidentId] = useState<Incident['id'] | null>(null);
   const [nextStepIndex, setNextStepIndex] = useState<number>(0);
   const [isRerouting, setIsRerouting] = useState(false);
-  const [mapHeading, setMapHeading] = useState<number>(0);
   const [deviceHeading, setDeviceHeading] = useState<number>(0);
-  const cameraRef = useRef<CameraRef | null>(null);
-  const lastMovingBearingCameraUpdateMsRef = useRef<number>(0);
+  const responderMarkerSourceRef = useRef<ShapeSourceRef | null>(null);
   const isUserInteractingRef = useRef(false);
   // Tracks consecutive off-route GPS checks to avoid false positives from jitter
   const offRouteCountRef = useRef<number>(0);
@@ -266,7 +327,27 @@ const MapScreen = memo(function MapScreen({
   const initialRouteFetchKeyRef = useRef<string | null>(null);
   const lastInitialRouteAttemptMsRef = useRef<number>(0);
   const lastMarkerKeyAppliedRef = useRef<string | null>(null);
-  const movingBearingToggleInFlightRef = useRef(false);
+  const latestLocationRef = useRef<LocationCoords | null>(null);
+  const lastLocationStateUpdateMsRef = useRef(0);
+  const locationStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLocationUploadMsRef = useRef(0);
+  const locationUploadInFlightRef = useRef(false);
+  const lastHeadingUpdateMsRef = useRef(0);
+  const lastHeadingRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void loadLatestOpenFreeMapLightStyle().then((latestStyle) => {
+      if (isMounted && latestStyle) {
+        setOpenFreeMapStyle(latestStyle);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const isValidHeading = useCallback((value: unknown): value is number => {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -283,6 +364,46 @@ const MapScreen = memo(function MapScreen({
     [onMovingBearingChange]
   );
 
+  const commitLocationState = useCallback((nextLocation: LocationCoords) => {
+    latestLocationRef.current = nextLocation;
+    const elapsed = Date.now() - lastLocationStateUpdateMsRef.current;
+
+    const commitLatest = () => {
+      const latest = latestLocationRef.current;
+      if (latest) {
+        lastLocationStateUpdateMsRef.current = Date.now();
+        setUserLocation(latest);
+      }
+      locationStateTimerRef.current = null;
+    };
+
+    if (elapsed >= LOCATION_STATE_UPDATE_INTERVAL_MS) {
+      if (locationStateTimerRef.current) {
+        clearTimeout(locationStateTimerRef.current);
+        locationStateTimerRef.current = null;
+      }
+      commitLatest();
+      return;
+    }
+
+    if (!locationStateTimerRef.current) {
+      locationStateTimerRef.current = setTimeout(
+        commitLatest,
+        LOCATION_STATE_UPDATE_INTERVAL_MS - elapsed
+      );
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (locationStateTimerRef.current) {
+        clearTimeout(locationStateTimerRef.current);
+        locationStateTimerRef.current = null;
+      }
+    },
+    []
+  );
+
   // Watch hardware compass heading
   useEffect(() => {
     let headingSub: Location.LocationSubscription | null = null;
@@ -292,7 +413,23 @@ const MapScreen = memo(function MapScreen({
       Location.watchHeadingAsync((data) => {
         if (isSubscribed) {
           const heading = data.trueHeading >= 0 ? data.trueHeading : data.magHeading;
-          if (heading >= 0) setDeviceHeading(heading);
+          if (heading < 0) return;
+
+          const now = Date.now();
+          const lastHeading = lastHeadingRef.current;
+          const elapsed = now - lastHeadingUpdateMsRef.current;
+          const barelyChanged = lastHeading !== null && headingDelta(heading, lastHeading) < 1;
+
+          if (
+            elapsed < HEADING_UPDATE_INTERVAL_MS ||
+            (barelyChanged && elapsed < HEADING_IDLE_UPDATE_INTERVAL_MS)
+          ) {
+            return;
+          }
+
+          lastHeadingRef.current = heading;
+          lastHeadingUpdateMsRef.current = now;
+          setDeviceHeading(heading);
         }
       })
         .then((sub) => {
@@ -359,8 +496,11 @@ const MapScreen = memo(function MapScreen({
         granted ? null : 'Location permission is required to show your position.'
       );
 
+      // Always obtain a new GPS reading when the map is opened. The native
+      // foreground service may have continued moving while the JS app was
+      // closed, so the in-memory cache is not a reliable route origin here.
       const location = granted
-        ? await locationService.getCurrentLocation()
+        ? await locationService.getCurrentLocation(true)
         : locationService.getDefaultLocation();
       if (!isMounted) return;
 
@@ -391,9 +531,10 @@ const MapScreen = memo(function MapScreen({
     );
   }, [normalizedIncident, userLocation]);
 
-  const currentMapStyle = useMemo(() => {
-    return OPEN_STREET_MAP_STYLE;
-  }, []);
+  const currentMapStyle = useMemo(
+    () => (useFallbackMapStyle ? OPEN_STREET_MAP_FALLBACK_STYLE : openFreeMapStyle),
+    [openFreeMapStyle, useFallbackMapStyle]
+  );
 
   // Reset route state when destination changes (incident changes).
   useEffect(() => {
@@ -460,6 +601,59 @@ const MapScreen = memo(function MapScreen({
     fetchRoute,
   ]);
 
+  // When the app is opened again, its Android foreground service may have
+  // collected several newer GPS points while this screen was suspended.
+  // Rebuild the route from a forced fresh reading instead of retaining the
+  // old route origin shown before the app was closed.
+  useEffect(() => {
+    let previousAppState = AppState.currentState;
+
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      const returnedToForeground = previousAppState !== 'active' && nextAppState === 'active';
+      previousAppState = nextAppState;
+
+      if (
+        !returnedToForeground ||
+        !isActive ||
+        !incident?.id ||
+        destLat == null ||
+        destLng == null ||
+        isReroutingRef.current
+      ) {
+        return;
+      }
+
+      void (async () => {
+        try {
+          const currentLocation = await locationService.getCurrentLocation(true);
+          setUserLocation(currentLocation);
+          void fetchUserAddress(currentLocation.latitude, currentLocation.longitude);
+
+          isReroutingRef.current = true;
+          setIsRerouting(true);
+          await fetchRoute({
+            userLat: currentLocation.latitude,
+            userLng: currentLocation.longitude,
+            destLat,
+            destLng,
+          });
+          initialRouteFetchKeyRef.current = `${incident.id}:${destLat},${destLng}:${routeProfile}`;
+          lastInitialRouteAttemptMsRef.current = Date.now();
+          offRouteCountRef.current = 0;
+          setNextStepIndex(0);
+          setRouteVersion((prev) => prev + 1);
+        } catch (error) {
+          console.warn('[MapScreen] Unable to refresh route after app resume:', error);
+        } finally {
+          isReroutingRef.current = false;
+          setIsRerouting(false);
+        }
+      })();
+    });
+
+    return () => subscription.remove();
+  }, [destLat, destLng, fetchRoute, fetchUserAddress, incident?.id, isActive, routeProfile]);
+
   const handleSetRouteProfile = useCallback(
     (nextProfile: 'driving' | 'foot') => {
       if (routeProfile === nextProfile) return;
@@ -489,55 +683,47 @@ const MapScreen = memo(function MapScreen({
     (location: any) => {
       if (location && location.coords) {
         const { latitude, longitude, heading } = location.coords;
+        if (!isValidLatLng(latitude, longitude)) return;
+
         const normalizedHeading = isValidHeading(heading) ? heading : undefined;
+        const nextLocation = { latitude, longitude, heading: normalizedHeading };
 
-        console.log('[MapScreen] Location update:', {
-          lat: latitude,
-          lng: longitude,
-          heading: heading,
-          headingType: typeof heading,
-          isValidHeading: typeof heading === 'number' && !isNaN(heading),
+        // Update the map source immediately from the native GPS event. This
+        // keeps the custom icon synchronized with MapLibre's native user puck.
+        responderMarkerSourceRef.current?.setNativeProps({
+          shape: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Point',
+              coordinates: [longitude, latitude],
+            },
+          },
         });
+        // Route/UI calculations do not need to run at raw emulator frequency.
+        commitLocationState(nextLocation);
 
-        setUserLocation({ latitude, longitude, heading: normalizedHeading });
-        fetchUserAddress(latitude, longitude);
-
-        // Send location with heading to server
-        if (typeof normalizedHeading === 'number') {
-          console.log(`[MapScreen] Sending location with heading: ${normalizedHeading}°`);
+        // Rate-limit network work and never queue overlapping requests.
+        const now = Date.now();
+        if (
+          typeof normalizedHeading === 'number' &&
+          !locationUploadInFlightRef.current &&
+          now - lastLocationUploadMsRef.current >= LOCATION_UPLOAD_INTERVAL_MS
+        ) {
+          lastLocationUploadMsRef.current = now;
+          locationUploadInFlightRef.current = true;
           locationService
             .sendLocationWithHeading({ latitude, longitude }, normalizedHeading)
             .catch((error) => {
               console.log('[MapScreen] Failed to send location with heading:', error);
+            })
+            .finally(() => {
+              locationUploadInFlightRef.current = false;
             });
-        } else {
-          console.log(`[MapScreen] No valid heading to send (value: ${heading})`);
-        }
-
-        if (isMovingBearingActive) {
-          const effectiveHeading =
-            normalizedHeading ?? (isValidHeading(deviceHeading) ? deviceHeading : undefined);
-          if (typeof effectiveHeading === 'number') setMapHeading(effectiveHeading);
-          const now = Date.now();
-          if (now - lastMovingBearingCameraUpdateMsRef.current >= 250) {
-            lastMovingBearingCameraUpdateMsRef.current = now;
-
-            console.log(
-              `[MapScreen] Updating camera with heading: ${
-                typeof effectiveHeading === 'number' ? effectiveHeading : 'n/a'
-              }°`
-            );
-            const cameraUpdate: any = {
-              centerCoordinate: [longitude, latitude],
-              animationDuration: 250,
-            };
-            if (typeof effectiveHeading === 'number') cameraUpdate.heading = effectiveHeading;
-            cameraRef.current?.setCamera(cameraUpdate);
-          }
         }
       }
     },
-    [deviceHeading, fetchUserAddress, isMovingBearingActive, isValidHeading]
+    [commitLocationState, isValidHeading]
   );
 
   // Off-route detection: checks every time userLocation updates.
@@ -627,79 +813,12 @@ const MapScreen = memo(function MapScreen({
   }, [arrivalAlertIncidentId, incident?.id, incidentDistanceMeters]);
 
   const handleToggleFollow = useCallback(() => {
-    setIsFollowingUser((prev) => {
-      const next = !prev;
-      if (!next && isMovingBearingEnabled) {
-        setMovingBearingEnabled(false);
-      }
-      return next;
-    });
-  }, [isMovingBearingEnabled, setMovingBearingEnabled]);
-
-  // const recenterToUser = useCallback(() => {
-  //   if (!userLocation) return;
-  //   lastMovingBearingCameraUpdateMsRef.current = 0;
-  //   cameraRef.current?.setCamera({
-  //     centerCoordinate: [userLocation.longitude, userLocation.latitude],
-  //     animationDuration: 450,
-  //   });
-  // }, [userLocation]);
-
-  // const handleToggleMovingBearing = useCallback(async () => {
-  //   // TEMP (debug): disabled for now as requested.
-  //   // Re-enable by removing the early-return and uncommenting the implementation below.
-  //   movingBearingToggleInFlightRef.current = false;
-  //   setMovingBearingEnabled(false);
-  //   return;
-
-  //   /*
-  //   if (movingBearingToggleInFlightRef.current) return;
-  //   movingBearingToggleInFlightRef.current = true;
-
-  //   try {
-  //     const granted = hasLocationPermission || (await locationService.requestPermission(true));
-  //     setHasLocationPermission(granted);
-
-  //     if (!granted) {
-  //       setPermissionMessage('Location permission is required to use heading mode.');
-  //       setMovingBearingEnabled(false);
-  //       return;
-  //     }
-
-  //     setPermissionMessage(null);
-
-  //     const next = !isMovingBearingEnabled;
-
-  //     if (next) {
-  //       setIsFollowingUser(true);
-
-  //       if (userLocation) {
-  //         const effectiveHeading =
-  //           (isValidHeading(userLocation.heading) ? userLocation.heading : undefined) ??
-  //           (isValidHeading(deviceHeading) ? deviceHeading : undefined);
-
-  //         const cameraUpdate: any = {
-  //           centerCoordinate: [userLocation.longitude, userLocation.latitude],
-  //           animationDuration: 450,
-  //         };
-  //         if (typeof effectiveHeading === 'number') cameraUpdate.heading = effectiveHeading;
-  //         cameraRef.current?.setCamera(cameraUpdate);
-  //       } else {
-  //         recenterToUser();
-  //       }
-
-  //       lastMovingBearingCameraUpdateMsRef.current = 0;
-  //     }
-
-  //     setMovingBearingEnabled(next);
-  //   } finally {
-  //     // Prevent double taps / racey toggles
-  //     setTimeout(() => {
-  //       movingBearingToggleInFlightRef.current = false;
-  //     }, 450);
-  //   }
-  //   */
-  // }, [setMovingBearingEnabled]);
+    const next = !isFollowingUser;
+    if (!next && isMovingBearingEnabled) {
+      setMovingBearingEnabled(false);
+    }
+    setIsFollowingUser(next);
+  }, [isFollowingUser, isMovingBearingEnabled, setMovingBearingEnabled, setIsFollowingUser]);
 
   const renderMode = 'normal';
   const androidRenderMode = 'normal';
@@ -708,18 +827,31 @@ const MapScreen = memo(function MapScreen({
   const routeColor = isDarkMode ? '#38bdf8' : '#2563eb';
   const routeCasingColor = isDarkMode ? '#0f172a' : '#1e3a8a';
 
-  const hasRouteLine = !!routeGeometry?.coordinates?.length;
+  const visibleRouteGeometry = useMemo<RouteGeometry | null>(() => {
+    if (!routeGeometry) return null;
+    if (!userLocation) return routeGeometry;
+    return trimRouteToCurrentLocation(routeGeometry, userLocation);
+  }, [routeGeometry, userLocation]);
+
+  const hasRouteLine = !!visibleRouteGeometry?.coordinates?.length;
 
   const routeSourceId = `route-source-${routeVersion}-${isFullscreen ? 'full' : 'norm'}`;
   const routeLineId = `route-line-${routeVersion}-${isFullscreen ? 'full' : 'norm'}`;
-  const userCarLayerId = `user-car-layer-${isFullscreen ? 'full' : 'norm'}`;
+  const responderMarkerSourceId = `responder-marker-source-${isFullscreen ? 'full' : 'norm'}`;
+  const responderMarkerLayerId = `responder-marker-layer-${isFullscreen ? 'full' : 'norm'}`;
 
   return (
     <>
       <MapView
-        key={`map-${isFullscreen ? 'full' : 'norm'}`}
         style={{ flex: 1 }}
         mapStyle={currentMapStyle}
+        surfaceView={true}
+        preferredFramesPerSecond={30}
+        regionWillChangeDebounceTime={100}
+        regionDidChangeDebounceTime={500}
+        onDidFailLoadingMap={() => {
+          setUseFallbackMapStyle(true);
+        }}
         onPress={onMapPress}
         onLongPress={onMapRelease}
         onRegionWillChange={(feature) => {
@@ -738,20 +870,8 @@ const MapScreen = memo(function MapScreen({
             }
           }
         }}
-        onRegionIsChanging={(feature) => {
-          const payload = (feature as any)?.properties || (feature as any);
-          const newHeading = payload?.heading ?? payload?.bearing;
-          if (typeof newHeading === 'number') {
-            setMapHeading(newHeading);
-          }
-        }}
-        onRegionDidChange={(feature) => {
+        onRegionDidChange={() => {
           isUserInteractingRef.current = false;
-          const payload = (feature as any)?.properties || (feature as any);
-          const newHeading = payload?.heading ?? payload?.bearing;
-          if (typeof newHeading === 'number') {
-            setMapHeading(newHeading);
-          }
         }}
         compassEnabled={!isMovingBearingActive}
         compassViewPosition={0}
@@ -760,7 +880,6 @@ const MapScreen = memo(function MapScreen({
         zoomEnabled={true}
         scrollEnabled={true}>
         <Camera
-          ref={cameraRef}
           defaultSettings={{
             centerCoordinate: initialCenter ?? [124.02982096568188, 12.706220102613308],
             zoomLevel: 16,
@@ -780,13 +899,15 @@ const MapScreen = memo(function MapScreen({
             renderMode={renderMode}
             androidRenderMode={androidRenderMode as any}
             showsUserHeadingIndicator={false}
-            onUpdate={handleCameraUserLocationChange}>
-            <View style={{ width: 0, height: 0, opacity: 0 }} />
-          </UserLocation>
+            onUpdate={handleCameraUserLocationChange}
+          />
         )}
 
+        {/* Register the bundled marker image once, before its source/layer moves. */}
+        <Images images={responderMarkerImages} />
+
         {/* Walking Route Polyline */}
-        {routeGeometry && routeGeometry.coordinates && routeGeometry.coordinates.length > 0 && (
+        {visibleRouteGeometry && visibleRouteGeometry.coordinates.length > 0 && (
           <ShapeSource
             id={routeSourceId}
             shape={{
@@ -795,7 +916,7 @@ const MapScreen = memo(function MapScreen({
                 {
                   type: 'Feature',
                   properties: {},
-                  geometry: routeGeometry,
+                  geometry: visibleRouteGeometry,
                 },
               ],
             }}
@@ -803,7 +924,6 @@ const MapScreen = memo(function MapScreen({
             {/* Route Casing (Border / Shadow) to make it pop against the map */}
             <LineLayer
               id={`${routeLineId}-casing`}
-              belowLayerID={userLocation ? userCarLayerId : undefined}
               style={{
                 lineColor: isRerouting ? '#b45309' : routeCasingColor,
                 lineWidth: 12,
@@ -815,7 +935,6 @@ const MapScreen = memo(function MapScreen({
             {/* Main Route Line (Stronger and solid for high visibility) */}
             <LineLayer
               id={routeLineId}
-              belowLayerID={userLocation ? userCarLayerId : undefined}
               style={{
                 lineColor: isRerouting ? '#f59e0b' : routeColor,
                 lineWidth: 8,
@@ -827,40 +946,34 @@ const MapScreen = memo(function MapScreen({
           </ShapeSource>
         )}
 
-        {/* User Car Marker */}
+        {/*
+          SymbolLayer is intentional here: it updates one map feature in place
+          from the same latest GPS point used by the camera.
+        */}
         {userLocation && (
-          <>
-            <Images
-              images={{ [`carMarker-${isFullscreen ? 'full' : 'norm'}`]: selectedMarkerImage }}
+          <ShapeSource
+            ref={responderMarkerSourceRef}
+            id={responderMarkerSourceId}
+            shape={{
+              type: 'Feature',
+              properties: {},
+              geometry: {
+                type: 'Point',
+                coordinates: [userLocation.longitude, userLocation.latitude],
+              },
+            }}>
+            <SymbolLayer
+              id={responderMarkerLayerId}
+              style={{
+                iconImage: responderMarkerImageName,
+                iconSize: 0.12,
+                iconRotationAlignment: 'map',
+                iconRotate: deviceHeading,
+                iconAllowOverlap: true,
+                iconIgnorePlacement: true,
+              }}
             />
-            <ShapeSource
-              id={`user-car-source-${isFullscreen ? 'full' : 'norm'}`}
-              shape={{
-                type: 'FeatureCollection',
-                features: [
-                  {
-                    type: 'Feature',
-                    geometry: {
-                      type: 'Point',
-                      coordinates: [userLocation.longitude, userLocation.latitude],
-                    },
-                    properties: {},
-                  },
-                ],
-              }}>
-              <SymbolLayer
-                id={userCarLayerId}
-                style={{
-                  iconImage: `carMarker-${isFullscreen ? 'full' : 'norm'}`,
-                  iconSize: 0.12,
-                  iconRotationAlignment: 'map',
-                  iconRotate: deviceHeading,
-                  iconAllowOverlap: true,
-                  iconIgnorePlacement: true,
-                }}
-              />
-            </ShapeSource>
-          </>
+          </ShapeSource>
         )}
 
         {/* Incident Destination Marker - Red */}
@@ -995,6 +1108,7 @@ const MapScreen = memo(function MapScreen({
         <TouchableOpacity
           style={[
             styles.followButton,
+            { bottom: 30 + fullscreenBottomInset },
             isDarkMode && styles.followButtonDark,
             !isFollowingUser && styles.followButtonInactive,
           ]}
@@ -1004,7 +1118,7 @@ const MapScreen = memo(function MapScreen({
 
         {/* Route profile toggle buttons (Driving / foot) */}
         {incident?.id && normalizedIncident && (
-          <View style={styles.routeProfileButtons}>
+          <View style={[styles.routeProfileButtons, { bottom: 146 + fullscreenBottomInset }]}>
             <TouchableOpacity
               style={[
                 styles.routeProfileButton,
@@ -1037,7 +1151,11 @@ const MapScreen = memo(function MapScreen({
         {/* Fullscreen Toggle Button */}
         {onToggleFullscreen && showFullscreenToggle && (
           <TouchableOpacity
-            style={[styles.fullscreenButton, isDarkMode && styles.fullscreenButtonDark]}
+            style={[
+              styles.fullscreenButton,
+              { bottom: 90 + fullscreenBottomInset },
+              isDarkMode && styles.fullscreenButtonDark,
+            ]}
             onPress={onToggleFullscreen}>
             <Icon
               name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'}

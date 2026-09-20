@@ -8,10 +8,14 @@ import {
   ViewStyle,
   NativeModules,
   Platform,
+  TouchableOpacity,
   UIManager,
 } from 'react-native';
 import { Incident as IncidentType } from '@/types';
 import MapScreen from './MapScreen';
+import GoogleMapScreen from './GoogleMapScreen';
+
+export type MapProvider = 'google' | 'maplibre';
 
 interface MapProps {
   isDarkMode: boolean;
@@ -26,8 +30,12 @@ interface MapProps {
   containerStyle?: StyleProp<ViewStyle>;
   isMovingBearingEnabled?: boolean;
   onMovingBearingChange?: (enabled: boolean) => void;
+  isFollowingUser?: boolean;
+  onFollowingUserChange?: (following: boolean) => void;
   isActive?: boolean;
   markerKey?: string | null;
+  mapProvider?: MapProvider;
+  onMapProviderChange?: (provider: MapProvider) => void;
 }
 
 const MAPLIBRE_NATIVE_MODULE_NAME = 'MLRNModule';
@@ -62,6 +70,10 @@ const isMapLibreAvailable = () => {
   );
 };
 
+// Google is rendered by the Maps JavaScript API inside react-native-webview,
+// so it does not rely on a separately registered native map view manager.
+const isGoogleMapsAvailable = () => Platform.OS !== 'web';
+
 export const Map: React.FC<MapProps> = ({
   isDarkMode,
   isFullscreen,
@@ -74,94 +86,182 @@ export const Map: React.FC<MapProps> = ({
   containerStyle,
   isMovingBearingEnabled: isMovingBearingEnabledProp,
   onMovingBearingChange,
+  isFollowingUser,
+  onFollowingUserChange,
   isActive = true,
   markerKey,
+  mapProvider: mapProviderProp,
+  onMapProviderChange,
 }) => {
   const [isMovingBearingEnabledLocal, setIsMovingBearingEnabledLocal] = useState(false);
+  const [mapProviderLocal, setMapProviderLocal] = useState<MapProvider>('google');
+  const [fallbackMessage, setFallbackMessage] = useState<string | null>(null);
   const isMovingBearingEnabled = isMovingBearingEnabledProp ?? isMovingBearingEnabledLocal;
   const setIsMovingBearingEnabled = onMovingBearingChange ?? setIsMovingBearingEnabledLocal;
+  const mapProvider = mapProviderProp ?? mapProviderLocal;
+
+  const setMapProvider = (provider: MapProvider) => {
+    setMapProviderLocal(provider);
+    onMapProviderChange?.(provider);
+  };
 
   const resolvedMapHeight = mapHeight ?? (isFullscreen ? Dimensions.get('window').height : 600);
   const canRenderNativeMap = isMapLibreAvailable();
+  const canRenderGoogleMap = isGoogleMapsAvailable();
+  const activeProvider = mapProvider === 'google' && canRenderGoogleMap ? 'google' : 'maplibre';
+
+  const selectProvider = (provider: MapProvider) => {
+    setMapProvider(provider);
+    setFallbackMessage(null);
+  };
 
   return (
-    <View
-      style={[
-        styles.mapContainer,
-        containerStyle,
-        {
-          backgroundColor: isDarkMode ? '#1a1a2e' : '#E0E7FF',
-          height: resolvedMapHeight,
-          borderRadius: isFullscreen ? 0 : 12,
-        },
-      ]}
-    >
-      {/* Map Height Label */}
+    <View style={[styles.mapLayout, containerStyle]}>
       {!isFullscreen && (
-        <View style={styles.heightLabel} pointerEvents="none">
-          <Text style={[styles.heightLabelText, isDarkMode && styles.heightLabelTextDark]}>
-            {resolvedMapHeight}px
+        <View style={styles.providerSwitcher}>
+          <Text style={[styles.providerLabel, isDarkMode && styles.providerLabelDark]}>
+            Map engine
           </Text>
+          <View style={[styles.providerButtons, isDarkMode && styles.providerButtonsDark]}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={!canRenderGoogleMap}
+              onPress={() => canRenderGoogleMap && selectProvider('google')}
+              style={[
+                styles.providerButton,
+                activeProvider === 'google' && styles.providerButtonActive,
+                !canRenderGoogleMap && styles.providerButtonDisabled,
+              ]}>
+              <Text
+                style={[
+                  styles.providerButtonText,
+                  activeProvider === 'google' && styles.providerButtonTextActive,
+                ]}>
+                Google
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={!canRenderNativeMap}
+              onPress={() => canRenderNativeMap && selectProvider('maplibre')}
+              style={[
+                styles.providerButton,
+                activeProvider === 'maplibre' && styles.providerButtonActive,
+                !canRenderNativeMap && styles.providerButtonDisabled,
+              ]}>
+              <Text
+                style={[
+                  styles.providerButtonText,
+                  activeProvider === 'maplibre' && styles.providerButtonTextActive,
+                ]}>
+                MapLibre
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
+      <View
+        style={[
+          styles.mapContainer,
+          {
+            backgroundColor: isDarkMode ? '#1a1a2e' : '#E0E7FF',
+            height: resolvedMapHeight,
+            borderRadius: isFullscreen ? 0 : 12,
+          },
+        ]}>
+        {/* Map Height Label */}
+        {!isFullscreen && (
+          <View style={styles.heightLabel} pointerEvents="none">
+            <Text style={[styles.heightLabelText, isDarkMode && styles.heightLabelTextDark]}>
+              {resolvedMapHeight}px
+            </Text>
+          </View>
+        )}
 
-      {/* Map Grid Overlay */}
-      <View style={styles.mapGrid} />
+        {/* Map Grid Overlay */}
+        <View style={styles.mapGrid} />
 
-      {/* SVG Roads Layer */}
-      <View style={styles.mapRoads}>
-        <View style={StyleSheet.absoluteFillObject}>
-          <View className="w-full h-full">
-            <View className="flex-1 items-center justify-center">
-              {/* Main roads */}
+        {/* SVG Roads Layer */}
+        <View style={styles.mapRoads}>
+          <View style={StyleSheet.absoluteFillObject}>
+            <View className="h-full w-full">
+              <View className="flex-1 items-center justify-center">{/* Main roads */}</View>
             </View>
           </View>
         </View>
-      </View>
 
-      {canRenderNativeMap ? (
-        <View style={[styles.mapScreenWrapper, { opacity: 1 }]}>
-          <MapScreen
-            onMapPress={onMapPress}
-            onMapRelease={onMapRelease}
-            isDarkMode={isDarkMode}
-            incident={incident}
-            isFullscreen={isFullscreen}
-            onToggleFullscreen={onToggleFullscreen}
-            showFullscreenToggle={showFullscreenToggle}
-            isMovingBearingEnabled={isMovingBearingEnabled}
-            onMovingBearingChange={setIsMovingBearingEnabled}
-            isActive={isActive}
-            markerKey={markerKey}
-          />
-        </View>
-      ) : (
-        <View
-          style={[
-            styles.mapFallback,
-            {
-              backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.88)' : 'rgba(255, 255, 255, 0.94)',
-              borderColor: isDarkMode ? '#1E3A8A' : '#BFDBFE',
-            },
-          ]}>
-          <Text style={[styles.mapFallbackTitle, { color: isDarkMode ? '#F8FAFC' : '#0F172A' }]}>
-            Map unavailable in this build
-          </Text>
-          <Text
+        {activeProvider === 'google' ? (
+          <View style={[styles.mapScreenWrapper, { opacity: 1 }]}>
+            <GoogleMapScreen
+              onMapPress={onMapPress}
+              onMapRelease={onMapRelease}
+              isDarkMode={isDarkMode}
+              incident={incident}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={onToggleFullscreen}
+              showFullscreenToggle={showFullscreenToggle}
+              isActive={isActive}
+              isFollowingUser={isFollowingUser}
+              onFollowingUserChange={onFollowingUserChange}
+              onGoogleMapUnavailable={(reason) => {
+                setMapProvider('maplibre');
+                setFallbackMessage(reason);
+              }}
+            />
+          </View>
+        ) : canRenderNativeMap ? (
+          <View style={[styles.mapScreenWrapper, { opacity: 1 }]}>
+            <MapScreen
+              onMapPress={onMapPress}
+              onMapRelease={onMapRelease}
+              isDarkMode={isDarkMode}
+              incident={incident}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={onToggleFullscreen}
+              showFullscreenToggle={showFullscreenToggle}
+              isMovingBearingEnabled={isMovingBearingEnabled}
+              onMovingBearingChange={setIsMovingBearingEnabled}
+              isFollowingUser={isFollowingUser}
+              onFollowingUserChange={onFollowingUserChange}
+              isActive={isActive}
+              markerKey={markerKey}
+            />
+          </View>
+        ) : (
+          <View
             style={[
-              styles.mapFallbackBody,
-              { color: isDarkMode ? '#CBD5E1' : '#334155' },
+              styles.mapFallback,
+              {
+                backgroundColor: isDarkMode
+                  ? 'rgba(15, 23, 42, 0.88)'
+                  : 'rgba(255, 255, 255, 0.94)',
+                borderColor: isDarkMode ? '#1E3A8A' : '#BFDBFE',
+              },
             ]}>
-            Rebuild and reinstall the responder development app so the MapLibre native view is
-            registered before loading this project.
-          </Text>
-        </View>
-      )}
+            <Text style={[styles.mapFallbackTitle, { color: isDarkMode ? '#F8FAFC' : '#0F172A' }]}>
+              Map unavailable in this build
+            </Text>
+            <Text style={[styles.mapFallbackBody, { color: isDarkMode ? '#CBD5E1' : '#334155' }]}>
+              Rebuild and reinstall the responder development app so the MapLibre native view is
+              registered before loading this project.
+            </Text>
+          </View>
+        )}
+
+        {fallbackMessage && (
+          <View style={styles.fallbackNotice} pointerEvents="none">
+            <Text style={styles.fallbackNoticeText}>{fallbackMessage}</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  mapLayout: {
+    width: '100%',
+  },
   mapContainer: {
     width: '100%',
     position: 'relative',
@@ -260,6 +360,71 @@ const styles = StyleSheet.create({
   mapScreenWrapper: {
     position: 'absolute',
     inset: 0,
+  },
+  providerSwitcher: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  providerLabel: {
+    color: '#334155',
+    fontSize: 10,
+    fontWeight: '800',
+    marginBottom: 0,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  providerLabelDark: {
+    color: '#CBD5E1',
+  },
+  providerButtons: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 10,
+    padding: 3,
+    elevation: 4,
+  },
+  providerButtonsDark: {
+    backgroundColor: 'rgba(15,23,42,0.96)',
+  },
+  providerButton: {
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderRadius: 7,
+  },
+  providerButtonActive: {
+    backgroundColor: '#2563EB',
+  },
+  providerButtonText: {
+    color: '#475569',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  providerButtonTextActive: {
+    color: '#fff',
+  },
+  providerButtonDisabled: {
+    opacity: 0.45,
+  },
+  fallbackNotice: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 12,
+    zIndex: 31,
+    backgroundColor: 'rgba(146, 64, 14, 0.94)',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  fallbackNoticeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   mapFallback: {
     position: 'absolute',

@@ -118,6 +118,13 @@ class OverlayLocationModule(
 
   @ReactMethod
   fun setOverlayVisible(visible: Boolean, promise: Promise) {
+    // Updating the bubble must not accidentally start a location foreground
+    // service after its start was rejected for lack of location permission.
+    if (!hasAnyLocationPermission() || !LocationOverlayService.isRunning()) {
+      promise.resolve(false)
+      return
+    }
+
     try {
       val intent = Intent(reactContext, LocationOverlayService::class.java).apply {
         action = LocationOverlayService.ACTION_SET_VISIBILITY

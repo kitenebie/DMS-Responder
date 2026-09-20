@@ -39,15 +39,11 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "UIBackgroundModes": [
-          "location"
-        ],
+        "UIBackgroundModes": ["location"],
         "NSLocationWhenInUseUsageDescription": "We need your location to show your position.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "We need your location to track your position even when the app is closed."
       }
@@ -78,6 +74,9 @@
       "package": "com.irosinmobile.responder"
     },
     "extra": {
+      "googleMapsApiKey": "AIzaSyC0evbrXPY5X7up5PQLORq_vGKV3aYGbj8",
+      "googleMapId": "eceada71dedb29c0e2bce96b",
+      "openRouteServiceApiKey": "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImRjZDA5NTkzMTJkYzQyZmRiNzYzOWI1NmVhNmE4NWZhIiwiaCI6Im11cm11cjY0In0=",
       "eas": {
         "projectId": "59b9506b-2f6f-47d1-9f0d-790a82ad1dc8"
       }

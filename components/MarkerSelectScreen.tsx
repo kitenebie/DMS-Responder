@@ -6,10 +6,10 @@ import {
   StyleSheet,
   Image,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Icon } from './Icon';
 
@@ -51,6 +51,7 @@ export const MarkerSelectScreen: React.FC<Props> = ({
   showBackButton = false,
   onBack,
 }) => {
+  const insets = useSafeAreaInsets();
   const [selected, setSelected] = useState<MarkerKey>(
     (initialMarker as MarkerKey) ?? 'car'
   );
@@ -170,7 +171,15 @@ export const MarkerSelectScreen: React.FC<Props> = ({
       </ScrollView>
 
       {/* Save button */}
-      <View style={[styles.footer, { backgroundColor: theme.bg, borderTopColor: theme.border }]}>
+      <View
+        style={[
+          styles.footer,
+          {
+            backgroundColor: theme.bg,
+            borderTopColor: theme.border,
+            paddingBottom: Math.max(insets.bottom, 16),
+          },
+        ]}>
         <TouchableOpacity
           style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
           onPress={handleSave}

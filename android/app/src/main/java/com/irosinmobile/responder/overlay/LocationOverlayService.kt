@@ -45,8 +45,11 @@ class LocationOverlayService : Service() {
   private var overlayLayoutParams: WindowManager.LayoutParams? = null
   private var foregroundStarted = false
   private var wakeLock: PowerManager.WakeLock? = null
+  private var lastFirebaseSendTimeMs: Long = 0L
   private var lastMySqlSendTimeMs: Long = 0L
   private var tickCount = 0L
+  private val firebaseWriteInFlight = AtomicBoolean(false)
+  private val serverWriteInFlight = AtomicBoolean(false)
 
   // Continuously updated by requestLocationUpdates
   @Volatile private var cachedLat: Double = 0.0
@@ -84,6 +87,7 @@ class LocationOverlayService : Service() {
     private const val PREF_FIREBASE_URL = "firebase_url"
     private const val CHANNEL_ID = "overlay_location_channel"
     private const val NOTIFICATION_ID = 4051
+    private const val FIREBASE_THROTTLE_MS = 2_000L
     private const val MYSQL_THROTTLE_MS = 15_000L
     private const val TICK_INTERVAL_MS = 1_000L
     private const val WAKE_LOCK_TAG = "Responder:OverlayLocationServiceWakeLock"
@@ -132,7 +136,6 @@ class LocationOverlayService : Service() {
 
   override fun onCreate() {
     super.onCreate()
-    running.set(true)
     windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
     createNotificationChannel()
     acquireWakeLock()
@@ -171,10 +174,27 @@ class LocationOverlayService : Service() {
       return START_NOT_STICKY
     }
 
+    // A location foreground service cannot be promoted without a granted
+    // foreground location permission. This can happen when the permission was
+    // denied or revoked between the React Native permission check and service
+    // startup. Stop cleanly instead of letting startForeground crash the app.
+    if (!hasLocationPermission()) {
+      android.util.Log.w("LocationOverlayService", "Location permission is missing. Stopping before foreground startup.")
+      stopSelf()
+      return START_NOT_STICKY
+    }
+
     // Foreground
     if (!foregroundStarted) {
-      startForeground(NOTIFICATION_ID, createNotification())
-      foregroundStarted = true
+      try {
+        startForeground(NOTIFICATION_ID, createNotification())
+        foregroundStarted = true
+        running.set(true)
+      } catch (error: SecurityException) {
+        android.util.Log.e("LocationOverlayService", "Unable to start location foreground service.", error)
+        stopSelf()
+        return START_NOT_STICKY
+      }
     }
 
     acquireWakeLock()
@@ -258,29 +278,43 @@ class LocationOverlayService : Service() {
     val lat = cachedLat
     val lng = cachedLng
 
-    // Firebase write — fire and forget on network pool (NEVER blocks tick)
+    val now = System.currentTimeMillis()
+
+    // Never queue multiple Firebase requests when a connection is slow.
     val pool = networkPool
-    if (pool != null && !pool.isShutdown) {
+    if (
+      now - lastFirebaseSendTimeMs >= FIREBASE_THROTTLE_MS &&
+      pool != null &&
+      !pool.isShutdown &&
+      firebaseWriteInFlight.compareAndSet(false, true)
+    ) {
+      lastFirebaseSendTimeMs = now
       pool.execute {
         try {
           writeToFirebase(lat, lng)
         } catch (t: Throwable) {
           android.util.Log.e("LocationOverlayService", "[Firebase] Network thread error: ${t.message}")
+        } finally {
+          firebaseWriteInFlight.set(false)
         }
       }
     }
 
-    // Server write — throttled
-    val now = System.currentTimeMillis()
-    if (now - lastMySqlSendTimeMs >= MYSQL_THROTTLE_MS) {
+    // Server write — throttled and limited to one in-flight request.
+    if (
+      now - lastMySqlSendTimeMs >= MYSQL_THROTTLE_MS &&
+      pool != null &&
+      !pool.isShutdown &&
+      serverWriteInFlight.compareAndSet(false, true)
+    ) {
       lastMySqlSendTimeMs = now
-      if (pool != null && !pool.isShutdown) {
-        pool.execute {
-          try {
-            writeToServer(lat, lng)
-          } catch (t: Throwable) {
-            android.util.Log.e("LocationOverlayService", "[Server] Network thread error: ${t.message}")
-          }
+      pool.execute {
+        try {
+          writeToServer(lat, lng)
+        } catch (t: Throwable) {
+          android.util.Log.e("LocationOverlayService", "[Server] Network thread error: ${t.message}")
+        } finally {
+          serverWriteInFlight.set(false)
         }
       }
     }
@@ -317,18 +351,18 @@ class LocationOverlayService : Service() {
       @Deprecated("") override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
     }
 
-    // Register on GPS
+    // One fix per second is enough for live tracking and avoids a raw sensor
+    // callback flood from GPS route emulators.
     if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
       try {
-        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, gpsListener!!, handler.looper)
+        lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1_000L, 1f, gpsListener!!, handler.looper)
         android.util.Log.i("LocationOverlayService", "[GPS] GPS provider registered")
       } catch (_: Throwable) {}
     }
 
-    // Register on Network too
     if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
       try {
-        lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0L, 0f, gpsListener!!, handler.looper)
+        lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 1_000L, 1f, gpsListener!!, handler.looper)
         android.util.Log.i("LocationOverlayService", "[GPS] Network provider registered")
       } catch (_: Throwable) {}
     }

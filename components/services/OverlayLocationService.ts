@@ -44,11 +44,13 @@ const readOverlayConfig = async (): Promise<{ token: string; userId: number }> =
       parsed?.user?.access_token ??
       '';
 
+    // Firebase responder records are keyed by the authenticated User ID.
+    // `unit_id` identifies the assigned unit, not the responder account.
     const parsedUserId = Number(
-      parsed?.user?.unit_id ??
-        parsed?.unit_id ??
-        parsed?.user?.id ??
-        parsed?.id
+      parsed?.user?.id ??
+        parsed?.id ??
+        parsed?.user?.unit_id ??
+        parsed?.unit_id
     );
 
     return {
