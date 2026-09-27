@@ -532,7 +532,7 @@ class LocationOverlayService : Service() {
   }
 
   private fun createNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
-    .setSmallIcon(R.mipmap.ic_launcher).setContentTitle("Responder active").setContentText("Location → Firebase every 1s")
+    .setSmallIcon(R.drawable.ic_notification_irorescue).setContentTitle("Responder active").setContentText("Location → Firebase every 1s")
     .setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(true).setOnlyAlertOnce(true)
     .setContentIntent(packageManager.getLaunchIntentForPackage(packageName)?.let { PendingIntent.getActivity(this,9001,it,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) })
     .addAction(R.mipmap.ic_launcher,"Stop",PendingIntent.getService(this,9002,Intent(this,LocationOverlayService::class.java).apply{action=ACTION_STOP},PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))

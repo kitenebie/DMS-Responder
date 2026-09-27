@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Monochrome IroRescue siren mark for Android status-bar notifications.
+  Small notification icons are tinted by Android, so this intentionally uses
+  alpha-only artwork instead of the full-color launcher logo.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,14L19,14L19,19L5,19ZM7,13L17,13L17,12C17,9.24 14.76,7 12,7C9.24,7 7,9.24 7,12ZM11,2L13,2L13,5L11,5ZM4.22,4.81L5.63,3.4L7.75,5.52L6.34,6.93ZM16.25,5.52L18.37,3.4L19.78,4.81L17.66,6.93ZM2,10L5,10L5,12L2,12ZM19,10L22,10L22,12L19,12Z" />
+</vector>
