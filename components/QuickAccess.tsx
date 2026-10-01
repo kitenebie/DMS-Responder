@@ -8,6 +8,7 @@ import { getTheme } from '@/utils';
 interface QuickAccessProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
+  hasChatPeerTyping?: boolean;
   onOpenReport?: () => void;
   onOpenStatus?: () => void;
   currentStatus: IncidentStatus;
@@ -18,6 +19,7 @@ interface QuickAccessProps {
 export const QuickAccess: React.FC<QuickAccessProps> = ({
   onOpenChat,
   onOpenHistory,
+  hasChatPeerTyping = false,
   onOpenReport,
   onOpenStatus,
   currentStatus,
@@ -74,9 +76,17 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
         <TouchableOpacity
           onPress={onOpenChat}
           style={styles.quickButton}
+          accessibilityLabel={hasChatPeerTyping ? 'Dispatch Chat, a chat participant is typing' : 'Dispatch Chat'}
         >
           <View style={styles.iconContainer}>
             <Icon name="chat" size={20} color="#fff" />
+            {hasChatPeerTyping ? (
+              <View style={styles.typingBadge} accessibilityLabel="Chat participant is typing">
+                <View style={styles.typingDot} />
+                <View style={styles.typingDot} />
+                <View style={styles.typingDot} />
+              </View>
+            ) : null}
           </View>
           <View style={styles.buttonContent}>
             <Text style={[styles.buttonLabel, { color: theme.text }]}>Dispatch Chat</Text>
@@ -176,6 +186,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563EB',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+    overflow: 'visible',
+  },
+  typingBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -16,
+    minWidth: 25,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#0F172A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  typingDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
   buttonContent: {
     flex: 1,

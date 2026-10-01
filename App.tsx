@@ -68,11 +68,18 @@ import { saveResponderLocation } from './services/FirebaseLocationService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+type ResponderChatParticipant = 'citizen' | 'dispatcher';
+
 type ResponderChatTypingSession = {
   reportId: number;
   peerId: number;
-  conversationTarget: 'citizen' | 'dispatcher';
+  conversationTarget: ResponderChatParticipant;
   lastPingAt: number;
+};
+
+const EMPTY_CHAT_PEER_TYPING: Record<ResponderChatParticipant, boolean> = {
+  citizen: false,
+  dispatcher: false,
 };
 
 const AppContent = () => {
@@ -92,7 +99,9 @@ const AppContent = () => {
   const [currentRoute, setCurrentRoute] = useState<string | undefined>('Home');
   const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
   const [isNativeLocationServiceActive, setIsNativeLocationServiceActive] = useState(false);
-  const [chatPeerIsTyping, setChatPeerIsTyping] = useState(false);
+  const [chatPeerTypingByTab, setChatPeerTypingByTab] = useState<Record<ResponderChatParticipant, boolean>>(
+    EMPTY_CHAT_PEER_TYPING
+  );
 
   const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
@@ -114,6 +123,10 @@ const AppContent = () => {
       additionalNotes: '',
     },
   });
+  const activeChatTypingTarget: ResponderChatParticipant =
+    state.activeChatTab === 'dispatcher' ? 'dispatcher' : 'citizen';
+  const chatPeerIsTyping = chatPeerTypingByTab[activeChatTypingTarget];
+  const chatButtonHasPeerTyping = chatPeerTypingByTab.citizen || chatPeerTypingByTab.dispatcher;
 
   const [incomingIncident, setIncomingIncident] = useState<Incident | null>(null);
   const [isMapInteracting, setIsMapInteracting] = useState(false);
@@ -153,6 +166,7 @@ const AppContent = () => {
     setChatScreenMode('live');
     setHistoryChatMessages([]);
     setHistoryChatTitle('Incident Chat');
+    setChatPeerTypingByTab(EMPTY_CHAT_PEER_TYPING);
     setState((prev) => ({
       ...prev,
       showIncomingModal: false,
@@ -651,19 +665,23 @@ const AppContent = () => {
   );
 
   useEffect(() => {
-    if (chatScreenMode !== 'live' || !state.showChat) {
-      setChatPeerIsTyping(false);
+    if (chatScreenMode !== 'live') {
+      setChatPeerTypingByTab(EMPTY_CHAT_PEER_TYPING);
       return;
     }
 
     const reportId = Number(state.activeIncident?.id);
-    const peerId =
-      state.activeChatTab === 'dispatcher'
-        ? state.activeIncident?.dispatcher_id ?? null
-        : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? null;
+    const peers: Array<[ResponderChatParticipant, number | null]> = [
+      ['citizen', state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? null],
+      ['dispatcher', state.activeIncident?.dispatcher_id ?? null],
+    ];
+    const validPeers = peers.filter(
+      (entry): entry is [ResponderChatParticipant, number] =>
+        typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0
+    );
 
-    if (!Number.isFinite(reportId) || reportId <= 0 || !peerId || peerId <= 0) {
-      setChatPeerIsTyping(false);
+    if (!Number.isFinite(reportId) || reportId <= 0 || validPeers.length === 0) {
+      setChatPeerTypingByTab(EMPTY_CHAT_PEER_TYPING);
       return;
     }
 
@@ -672,16 +690,26 @@ const AppContent = () => {
       if (RNAppState.currentState !== 'active') return;
 
       try {
-        const isTyping = await getResponderChatPeerTyping(reportId, peerId);
-        if (!disposed) setChatPeerIsTyping(isTyping);
+        const typingStates = await Promise.allSettled(
+          validPeers.map(([, peerId]) => getResponderChatPeerTyping(reportId, peerId))
+        );
+        if (disposed) return;
+
+        const nextTyping = { ...EMPTY_CHAT_PEER_TYPING };
+        typingStates.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            nextTyping[validPeers[index][0]] = result.value;
+          }
+        });
+        setChatPeerTypingByTab(nextTyping);
       } catch {
-        if (!disposed) setChatPeerIsTyping(false);
+        if (!disposed) setChatPeerTypingByTab(EMPTY_CHAT_PEER_TYPING);
       }
     };
 
     const subscription = RNAppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') void refresh();
-      if (nextState !== 'active') setChatPeerIsTyping(false);
+      if (nextState !== 'active') setChatPeerTypingByTab(EMPTY_CHAT_PEER_TYPING);
     });
     void refresh();
     const interval = setInterval(() => void refresh(), 2500);
@@ -693,12 +721,10 @@ const AppContent = () => {
     };
   }, [
     chatScreenMode,
-    state.activeChatTab,
     state.activeIncident?.citizen_id,
     state.activeIncident?.dispatcher_id,
     state.activeIncident?.id,
     state.activeIncident?.receiver_id,
-    state.showChat,
   ]);
 
   useEffect(() => stopResponderChatTyping, [stopResponderChatTyping]);
@@ -744,7 +770,6 @@ const AppContent = () => {
 
   const handleCloseChat = useCallback(() => {
     stopResponderChatTyping();
-    setChatPeerIsTyping(false);
     setState((prev) => ({
       ...prev,
       showChat: false,
@@ -988,7 +1013,6 @@ const AppContent = () => {
   );
   const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
     stopResponderChatTyping();
-    setChatPeerIsTyping(false);
     setState((prev) => ({
       ...prev,
       activeChatTab: tab,
@@ -1437,6 +1461,7 @@ const AppContent = () => {
                         onOpenChat={handleOpenChat}
                         onOpenHistory={handleOpenHistory}
                         onOpenStatus={handleScrollToStatus}
+                        hasChatPeerTyping={chatButtonHasPeerTyping}
                         currentStatus={trackerCurrentStatus}
                         isDarkMode={isDarkMode}
                         onUpdateStatus={handleUpdateStatus}
@@ -1476,7 +1501,11 @@ const AppContent = () => {
                     'Team Actions',
                     'Jump into report chat or open previously handled incident history.'
                   )}
-                  <ActionBar onOpenChat={handleOpenChat} onOpenHistory={handleOpenHistory} />
+                  <ActionBar
+                    onOpenChat={handleOpenChat}
+                    onOpenHistory={handleOpenHistory}
+                    hasChatPeerTyping={chatButtonHasPeerTyping}
+                  />
                 </>
               ) : (
                 <>
@@ -1559,6 +1588,7 @@ const AppContent = () => {
                 readOnly={chatScreenMode === 'history'}
                 onTypingChange={chatScreenMode === 'live' ? handleResponderChatTyping : undefined}
                 peerIsTyping={chatScreenMode === 'live' && chatPeerIsTyping}
+                typingTabs={chatScreenMode === 'live' ? chatPeerTypingByTab : undefined}
                 typingLabel={
                   state.activeChatTab === 'dispatcher'
                     ? 'Dispatcher is typing...'

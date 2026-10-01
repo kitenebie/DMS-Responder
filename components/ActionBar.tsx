@@ -5,16 +5,29 @@ import { Icon } from './Icon';
 interface ActionBarProps {
   onOpenChat: () => void;
   onOpenHistory: () => void;
+  hasChatPeerTyping?: boolean;
 }
 
 export const ActionBar: React.FC<ActionBarProps> = ({
   onOpenChat,
   onOpenHistory,
+  hasChatPeerTyping = false,
 }) => {
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={onOpenChat} style={styles.chatButton}>
+      <TouchableOpacity
+        onPress={onOpenChat}
+        style={styles.chatButton}
+        accessibilityLabel={hasChatPeerTyping ? 'Open Chat, a chat participant is typing' : 'Open Chat'}
+      >
         <Icon name="chat" size={18} color="#fff" />
+        {hasChatPeerTyping ? (
+          <View style={styles.typingBadge} accessibilityLabel="Chat participant is typing">
+            <View style={styles.typingDot} />
+            <View style={styles.typingDot} />
+            <View style={styles.typingDot} />
+          </View>
+        ) : null}
         <Text style={styles.buttonText}>Open Chat</Text>
       </TouchableOpacity>
 
@@ -70,5 +83,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  typingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    minWidth: 24,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+  },
+  typingDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
 });

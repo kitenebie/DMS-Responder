@@ -29,6 +29,7 @@ interface ChatScreenProps {
   onChangeChatTab?: (tab: 'dispatcher' | 'citizen') => void;
   onTypingChange?: (isTyping: boolean) => void;
   peerIsTyping?: boolean;
+  typingTabs?: Partial<Record<'dispatcher' | 'citizen', boolean>>;
   typingLabel?: string;
   title?: string;
   subtitle?: string;
@@ -45,6 +46,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   onChangeChatTab,
   onTypingChange,
   peerIsTyping = false,
+  typingTabs = {},
   typingLabel,
   title,
   subtitle,
@@ -226,18 +228,29 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             <View style={[styles.tabsContainer, { backgroundColor: theme.surfaceAlt }]}>
               {chatTabs.map((tab) => {
                 const isActive = activeChatTab === tab.key;
+                const isTyping = typingTabs[tab.key] === true;
                 return (
                   <TouchableOpacity
                     key={tab.key}
                     onPress={() => onChangeChatTab?.(tab.key)}
-                    style={[styles.tabButton, isActive && styles.tabButtonActive]}>
-                    <Text
-                      style={[
-                        styles.tabText,
-                        { color: isActive ? '#FFFFFF' : theme.textSecondary },
-                      ]}>
-                      {tab.label}
-                    </Text>
+                    style={[styles.tabButton, isActive && styles.tabButtonActive]}
+                    accessibilityLabel={isTyping ? `${tab.label}, typing` : tab.label}>
+                    <View style={styles.tabContent}>
+                      <Text
+                        style={[
+                          styles.tabText,
+                          { color: isActive ? '#FFFFFF' : theme.textSecondary },
+                        ]}>
+                        {tab.label}
+                      </Text>
+                      {isTyping ? (
+                        <View style={styles.tabTypingBadge} accessibilityLabel={`${tab.label} is typing`}>
+                          <View style={[styles.tabTypingDot, { backgroundColor: isActive ? '#FFFFFF' : '#2563EB' }]} />
+                          <View style={[styles.tabTypingDot, { backgroundColor: isActive ? '#FFFFFF' : '#2563EB' }]} />
+                          <View style={[styles.tabTypingDot, { backgroundColor: isActive ? '#FFFFFF' : '#2563EB' }]} />
+                        </View>
+                      ) : null}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -725,5 +738,20 @@ const styles = StyleSheet.create({
   tabText: {
     fontWeight: '700',
     fontSize: 12,
+  },
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  tabTypingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  tabTypingDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
   },
 });
