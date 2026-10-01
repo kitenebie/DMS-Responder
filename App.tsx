@@ -93,7 +93,7 @@ const AppContent = () => {
     showHistory: false,
     isDarkMode: isDarkMode,
     chatMessages: [],
-    activeChatTab: 'dispatcher',
+    activeChatTab: 'citizen',
     newMessage: '',
     historySearch: '',
     historyFilter: { type: 'all', status: 'all' },
@@ -149,7 +149,7 @@ const AppContent = () => {
       currentStatus: 'Active',
       showChat: false,
       chatMessages: [],
-      activeChatTab: 'dispatcher',
+      activeChatTab: 'citizen',
       reportForm: {
         actionsTaken: '',
         timeArrived: '',
@@ -559,6 +559,7 @@ const AppContent = () => {
       showIncomingModal: false,
       activeIncident: incomingIncident,
       currentStatus: 'Active',
+      activeChatTab: 'citizen',
     }));
   }, [incomingIncident]);
 
