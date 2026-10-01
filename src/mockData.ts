@@ -366,6 +366,32 @@ export const fetchChatMessages = async (reportId: string): Promise<ChatMessage[]
   }
 };
 
+export type ResponderChatTypingTarget = 'citizen' | 'dispatcher';
+
+export const setResponderChatTyping = async (
+  reportId: number,
+  typing: boolean,
+  peerId: number,
+  conversationTarget: ResponderChatTypingTarget,
+): Promise<void> => {
+  await api.post(`/responder/reports/${reportId}/typing`, {
+    typing,
+    peer_id: peerId,
+    conversation_target: conversationTarget,
+  });
+};
+
+export const getResponderChatPeerTyping = async (
+  reportId: number,
+  peerId: number,
+): Promise<boolean> => {
+  const response = await api.get(`/responder/reports/${reportId}/typing/participant`, {
+    params: { peer_id: peerId },
+  });
+
+  return response.data?.peer_typing === true;
+};
+
 export const addChatMessage = async (
   reportId: number,
   message: {

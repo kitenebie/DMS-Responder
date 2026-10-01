@@ -49,6 +49,8 @@ import {
   updateReportStatus,
   fetchReportStatus,
   getCurrentStatus,
+  getResponderChatPeerTyping,
+  setResponderChatTyping,
 } from './src/mockData';
 import { AppState as ResponderAppState, IncidentStatus, Incident, ChatMessage } from './src/types';
 import { RootStackParamList } from './src/navigation/types';
@@ -65,6 +67,13 @@ import FirebaseNotificationService from './services/FirebaseNotificationService'
 import { saveResponderLocation } from './services/FirebaseLocationService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+type ResponderChatTypingSession = {
+  reportId: number;
+  peerId: number;
+  conversationTarget: 'citizen' | 'dispatcher';
+  lastPingAt: number;
+};
 
 const AppContent = () => {
   const insets = useSafeAreaInsets();
@@ -83,6 +92,7 @@ const AppContent = () => {
   const [currentRoute, setCurrentRoute] = useState<string | undefined>('Home');
   const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
   const [isNativeLocationServiceActive, setIsNativeLocationServiceActive] = useState(false);
+  const [chatPeerIsTyping, setChatPeerIsTyping] = useState(false);
 
   const [state, setState] = useState<ResponderAppState>({
     showIncomingModal: false,
@@ -125,6 +135,7 @@ const AppContent = () => {
   const locationPermissionPromptShownRef = useRef(false);
   const stateRef = useRef(state);
   const chatScreenModeRef = useRef(chatScreenMode);
+  const responderTypingSessionRef = useRef<ResponderChatTypingSession | null>(null);
   const refreshIncomingIncidentRef = useRef<() => Promise<void>>(async () => {});
   const openReportChatFromOverlayRef = useRef<(reportId: number) => Promise<void>>(async () => {});
 
@@ -582,6 +593,117 @@ const AppContent = () => {
     [resetIncidentState]
   );
 
+  const stopResponderChatTyping = useCallback(() => {
+    const session = responderTypingSessionRef.current;
+    if (!session) return;
+
+    responderTypingSessionRef.current = null;
+    void setResponderChatTyping(
+      session.reportId,
+      false,
+      session.peerId,
+      session.conversationTarget
+    ).catch(() => {});
+  }, []);
+
+  const handleResponderChatTyping = useCallback(
+    (isTyping: boolean) => {
+      const reportId = Number(state.activeIncident?.id);
+      const conversationTarget = state.activeChatTab === 'dispatcher' ? 'dispatcher' : 'citizen';
+      const peerId =
+        conversationTarget === 'dispatcher'
+          ? state.activeIncident?.dispatcher_id ?? null
+          : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? null;
+
+      if (!Number.isFinite(reportId) || reportId <= 0 || !peerId || peerId <= 0) {
+        if (!isTyping) stopResponderChatTyping();
+        return;
+      }
+
+      const session = responderTypingSessionRef.current;
+      if (!isTyping) {
+        stopResponderChatTyping();
+        return;
+      }
+
+      const isSameConversation =
+        session?.reportId === reportId &&
+        session.peerId === peerId &&
+        session.conversationTarget === conversationTarget;
+      if (session && isSameConversation) {
+        if (Date.now() - session.lastPingAt >= 2000) {
+          session.lastPingAt = Date.now();
+          void setResponderChatTyping(reportId, true, peerId, conversationTarget).catch(() => {});
+        }
+        return;
+      }
+
+      stopResponderChatTyping();
+      responderTypingSessionRef.current = {
+        reportId,
+        peerId,
+        conversationTarget,
+        lastPingAt: Date.now(),
+      };
+      void setResponderChatTyping(reportId, true, peerId, conversationTarget).catch(() => {});
+    },
+    [state.activeChatTab, state.activeIncident, stopResponderChatTyping]
+  );
+
+  useEffect(() => {
+    if (chatScreenMode !== 'live' || !state.showChat) {
+      setChatPeerIsTyping(false);
+      return;
+    }
+
+    const reportId = Number(state.activeIncident?.id);
+    const peerId =
+      state.activeChatTab === 'dispatcher'
+        ? state.activeIncident?.dispatcher_id ?? null
+        : state.activeIncident?.citizen_id ?? state.activeIncident?.receiver_id ?? null;
+
+    if (!Number.isFinite(reportId) || reportId <= 0 || !peerId || peerId <= 0) {
+      setChatPeerIsTyping(false);
+      return;
+    }
+
+    let disposed = false;
+    const refresh = async () => {
+      if (RNAppState.currentState !== 'active') return;
+
+      try {
+        const isTyping = await getResponderChatPeerTyping(reportId, peerId);
+        if (!disposed) setChatPeerIsTyping(isTyping);
+      } catch {
+        if (!disposed) setChatPeerIsTyping(false);
+      }
+    };
+
+    const subscription = RNAppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') void refresh();
+      if (nextState !== 'active') setChatPeerIsTyping(false);
+    });
+    void refresh();
+    const interval = setInterval(() => void refresh(), 2500);
+
+    return () => {
+      disposed = true;
+      clearInterval(interval);
+      subscription.remove();
+    };
+  }, [
+    chatScreenMode,
+    state.activeChatTab,
+    state.activeIncident?.citizen_id,
+    state.activeIncident?.dispatcher_id,
+    state.activeIncident?.id,
+    state.activeIncident?.receiver_id,
+    state.showChat,
+  ]);
+
+  useEffect(() => stopResponderChatTyping, [stopResponderChatTyping]);
+  useEffect(() => stopResponderChatTyping, [state.activeIncident?.id, stopResponderChatTyping]);
+
   const handleToggleMapFullscreen = useCallback(() => {
     setState((prev) => ({
       ...prev,
@@ -621,11 +743,13 @@ const AppContent = () => {
   }, [state.activeIncident?.id]);
 
   const handleCloseChat = useCallback(() => {
+    stopResponderChatTyping();
+    setChatPeerIsTyping(false);
     setState((prev) => ({
       ...prev,
       showChat: false,
     }));
-  }, []);
+  }, [stopResponderChatTyping]);
 
   const handleOpenHistory = useCallback(() => {
     setState((prev) => ({
@@ -863,11 +987,13 @@ const AppContent = () => {
     [currentUserId, state.activeChatTab, state.activeIncident]
   );
   const handleChangeChatTab = useCallback((tab: 'dispatcher' | 'citizen') => {
+    stopResponderChatTyping();
+    setChatPeerIsTyping(false);
     setState((prev) => ({
       ...prev,
       activeChatTab: tab,
     }));
-  }, []);
+  }, [stopResponderChatTyping]);
 
   const filteredChatMessages = useMemo(() => {
     const activeTab = state.activeChatTab ?? 'citizen';
@@ -1431,6 +1557,13 @@ const AppContent = () => {
                 onSendMessage={handleSendMessage}
                 isDarkMode={isDarkMode}
                 readOnly={chatScreenMode === 'history'}
+                onTypingChange={chatScreenMode === 'live' ? handleResponderChatTyping : undefined}
+                peerIsTyping={chatScreenMode === 'live' && chatPeerIsTyping}
+                typingLabel={
+                  state.activeChatTab === 'dispatcher'
+                    ? 'Dispatcher is typing...'
+                    : 'Citizen is typing...'
+                }
                 chatTabs={
                   chatScreenMode === 'live'
                     ? [

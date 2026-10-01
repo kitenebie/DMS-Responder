@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,9 @@ interface ChatScreenProps {
   chatTabs?: { key: 'dispatcher' | 'citizen'; label: string }[];
   activeChatTab?: 'dispatcher' | 'citizen';
   onChangeChatTab?: (tab: 'dispatcher' | 'citizen') => void;
+  onTypingChange?: (isTyping: boolean) => void;
+  peerIsTyping?: boolean;
+  typingLabel?: string;
   title?: string;
   subtitle?: string;
 }
@@ -40,6 +43,9 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   chatTabs,
   activeChatTab,
   onChangeChatTab,
+  onTypingChange,
+  peerIsTyping = false,
+  typingLabel,
   title,
   subtitle,
 }) => {
@@ -51,6 +57,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [showCamera, setShowCamera] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const isTypingRef = useRef(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const theme = getTheme(isDarkMode);
   const keyboardOffset = Platform.OS === 'ios' ? 0 : insets.top;
   const canSend = !readOnly && (inputText.trim().length > 0 || selectedImages.length > 0);
@@ -99,12 +107,45 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     }
   }, [messages]);
 
+  const publishTyping = useCallback((isTyping: boolean) => {
+    if (isTypingRef.current === isTyping) {
+      if (isTyping) onTypingChange?.(true);
+      return;
+    }
+
+    isTypingRef.current = isTyping;
+    onTypingChange?.(isTyping);
+  }, [onTypingChange]);
+
+  const stopTyping = useCallback(() => {
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    publishTyping(false);
+  }, [publishTyping]);
+
+  const handleTextChange = useCallback((value: string) => {
+    setInputText(value);
+    if (!value.trim() || readOnly) {
+      stopTyping();
+      return;
+    }
+
+    publishTyping(true);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(stopTyping, 2500);
+  }, [publishTyping, readOnly, stopTyping]);
+
+  useEffect(() => stopTyping, [stopTyping]);
+
   const handleSend = async () => {
     if (readOnly || isSending) return;
     const trimmedMessage = inputText.trim();
     const imagesToSend = [...selectedImages];
     if (!trimmedMessage && imagesToSend.length === 0) return;
 
+    stopTyping();
     setIsSending(true);
     setInputText('');
     setSelectedImages([]);
@@ -284,25 +325,37 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               styles.inputContainer,
               { borderTopColor: theme.border, backgroundColor: theme.surface },
             ]}>
-            {selectedImages.length > 0 && (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.attachmentsRow}>
-                {selectedImages.map((uri, idx) => (
-                  <View key={`${uri}-${idx}`} style={styles.attachmentChip}>
-                    <Image source={{ uri }} style={styles.attachmentImage} />
-                    <TouchableOpacity
-                      onPress={() =>
-                        setSelectedImages((prev) => prev.filter((_, imageIndex) => imageIndex !== idx))
-                      }
-                      style={styles.attachmentRemove}>
-                      <Icon name="close" size={14} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
+              {selectedImages.length > 0 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.attachmentsRow}>
+                  {selectedImages.map((uri, idx) => (
+                    <View key={`${uri}-${idx}`} style={styles.attachmentChip}>
+                      <Image source={{ uri }} style={styles.attachmentImage} />
+                      <TouchableOpacity
+                        onPress={() =>
+                          setSelectedImages((prev) => prev.filter((_, imageIndex) => imageIndex !== idx))
+                        }
+                        style={styles.attachmentRemove}>
+                        <Icon name="close" size={14} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+            {peerIsTyping ? (
+              <View style={[styles.typingIndicator, { backgroundColor: theme.surfaceAlt }]}>
+                <View style={styles.typingDots}>
+                  <View style={[styles.typingDot, { backgroundColor: theme.textSecondary }]} />
+                  <View style={[styles.typingDot, { backgroundColor: theme.textSecondary }]} />
+                  <View style={[styles.typingDot, { backgroundColor: theme.textSecondary }]} />
+                </View>
+                <Text style={[styles.typingText, { color: theme.textSecondary }]}>
+                  {typingLabel ?? 'Typing...'}
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.inputRow}>
               <TouchableOpacity onPress={() => setShowAttachOptions(true)} style={styles.attachButton}>
                 <Icon name="paperclip" size={18} color={theme.text} />
@@ -319,7 +372,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                 placeholder="Type a message..."
                 placeholderTextColor={theme.textSecondary}
                 value={inputText}
-                onChangeText={setInputText}
+                onChangeText={handleTextChange}
+                onBlur={stopTyping}
                 onSubmitEditing={handleSend}
                 returnKeyType="send"
               />
@@ -501,6 +555,29 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#334155',
     backgroundColor: '#1E293B',
+  },
+  typingIndicator: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  typingDots: {
+    flexDirection: 'row',
+    gap: 3,
+  },
+  typingDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+  },
+  typingText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   attachmentsRow: {
     flexDirection: 'row',
