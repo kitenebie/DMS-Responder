@@ -81,7 +81,9 @@ export const QuickAccess: React.FC<QuickAccessProps> = ({
           <View style={styles.iconContainer}>
             <Icon name="chat" size={20} color="#fff" />
             {hasChatPeerTyping ? (
-              <View style={styles.typingBadge} accessibilityLabel="Chat participant is typing">
+              <View
+                style={[styles.typingBadge, { backgroundColor: theme.surface }]}
+                accessibilityLabel="Chat participant is typing">
                 <View style={styles.typingDot} />
                 <View style={styles.typingDot} />
                 <View style={styles.typingDot} />

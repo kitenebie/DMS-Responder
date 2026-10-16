@@ -41,8 +41,10 @@ interface CachedRoute {
 
 const ORS_DIRECTIONS_URL = 'https://api.heigit.org/openrouteservice/v2/directions';
 const ROUTE_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_ROUTE_CACHE_SIZE = 50;
 const routeCache = new Map<string, CachedRoute>();
 const inFlightRoutes = new Map<string, Promise<CachedRoute>>();
+let activeRouteKey: string | null = null;
 
 const routeKey = (params: {
   userLat: number;
@@ -157,6 +159,9 @@ const requestOpenRouteService = async (
 
   if (!response.ok) {
     if (isQuotaResponse(response, data)) {
+      if (profile === 'foot') {
+        throw new Error('Walking routes are unavailable while OpenRouteService is over quota.');
+      }
       return requestOsrmRoute(params, profile);
     }
     throw new Error(`OpenRouteService request failed: ${response.status}`);
@@ -191,6 +196,10 @@ export const useRouteStore = create<RouteState>((set, get) => ({
   fetchRoute: async (params) => {
     const profile = get().routeProfile;
     const key = routeKey({ ...params, profile });
+    activeRouteKey = key;
+    for (const [cachedKey, route] of routeCache) {
+      if (route.expiresAt <= Date.now()) routeCache.delete(cachedKey);
+    }
     const cached = routeCache.get(key);
     if (cached && cached.expiresAt > Date.now()) {
       set({
@@ -215,6 +224,12 @@ export const useRouteStore = create<RouteState>((set, get) => ({
     try {
       const route = await request;
       routeCache.set(key, route);
+      while (routeCache.size > MAX_ROUTE_CACHE_SIZE) {
+        const oldestKey = routeCache.keys().next().value;
+        if (oldestKey === undefined) break;
+        routeCache.delete(oldestKey);
+      }
+      if (activeRouteKey !== key) return;
       set({
         routeGeometry: route.geometry,
         routeSteps: route.steps,
@@ -224,13 +239,16 @@ export const useRouteStore = create<RouteState>((set, get) => ({
           route.provider === 'osrm' ? 'OpenRouteService limit reached. Using OSRM route.' : null,
       });
     } catch (error) {
-      set({
-        isRouteLoading: false,
-        error: error instanceof Error ? error.message : 'Route request failed',
-      });
+      if (activeRouteKey === key) {
+        set({
+          isRouteLoading: false,
+          error: error instanceof Error ? error.message : 'Route request failed',
+        });
+      }
     }
   },
   clearRoute: () => {
+    activeRouteKey = null;
     set({
       routeGeometry: null,
       routeSteps: [],

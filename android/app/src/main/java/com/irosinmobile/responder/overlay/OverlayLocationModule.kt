@@ -82,12 +82,6 @@ class OverlayLocationModule(
         if (options?.hasKey("token") == true) {
           putExtra(LocationOverlayService.EXTRA_TOKEN, options.getString("token"))
         }
-        if (options?.hasKey("userId") == true && !options.isNull("userId")) {
-          putExtra(LocationOverlayService.EXTRA_USER_ID, options.getInt("userId"))
-        }
-        if (options?.hasKey("firebaseUrl") == true && !options.isNull("firebaseUrl")) {
-          putExtra(LocationOverlayService.EXTRA_FIREBASE_URL, options.getString("firebaseUrl"))
-        }
       }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

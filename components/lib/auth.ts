@@ -152,20 +152,9 @@ export const logout = async () => {
   }
 };
 
-export const saveCredentials = async (email: string, password: string) => {
-  try {
-    await AsyncStorage.setItem('credentials', JSON.stringify({ email, password }));
-  } catch (error) {
-    console.log('Failed to save credentials:', error);
-  }
-};
-
 export const getCredentials = async () => {
   try {
     const creds = await AsyncStorage.getItem('credentials');
-
-    // creds is already a string, no need to stringify again
-    console.log(creds);
 
     return creds ? JSON.parse(creds) : null;
   } catch (error) {
@@ -201,8 +190,9 @@ export const refreshLogin = async () => {
     return userData;
   } catch (error: any) {
     console.log('Refresh login failed:', error);
-    // Clear invalid tokens
-    await AsyncStorage.removeItem('refresh_token');
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      await AsyncStorage.removeItem('refresh_token');
+    }
     throw error;
   }
 };

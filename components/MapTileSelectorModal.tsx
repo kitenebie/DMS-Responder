@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Icon } from './Icon';
+import { getTheme } from '../src/utils';
 
 export type MapLayerKey =
   | 'standard'
@@ -50,14 +51,7 @@ export const MapTileSelectorModal: React.FC<MapTileSelectorModalProps> = ({
   onClose,
   onSelectLayer,
 }) => {
-  const theme = {
-    background: isDarkMode ? '#020617' : '#EFF6FF',
-    surface: isDarkMode ? '#0F172A' : '#FFFFFF',
-    surfaceAlt: isDarkMode ? '#1E293B' : '#DBEAFE',
-    border: isDarkMode ? '#334155' : '#BFDBFE',
-    text: isDarkMode ? '#F8FAFC' : '#0F172A',
-    textSecondary: isDarkMode ? '#94A3B8' : '#475569',
-  };
+  const theme = getTheme(isDarkMode);
 
   const selectedOption = options.find((option) => option.key === selectedLayer) ?? options[0];
   const isSelectedOptionAvailable = layerAvailability?.[selectedOption.key] ?? true;

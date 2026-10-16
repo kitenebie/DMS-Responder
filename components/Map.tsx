@@ -169,15 +169,6 @@ export const Map: React.FC<MapProps> = ({
             borderRadius: isFullscreen ? 0 : 12,
           },
         ]}>
-        {/* Map Height Label */}
-        {!isFullscreen && (
-          <View style={styles.heightLabel} pointerEvents="none">
-            <Text style={[styles.heightLabelText, isDarkMode && styles.heightLabelTextDark]}>
-              {resolvedMapHeight}px
-            </Text>
-          </View>
-        )}
-
         {/* Map Grid Overlay */}
         <View style={styles.mapGrid} />
 
@@ -365,12 +356,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
-    paddingHorizontal: 2,
+    marginBottom: 10,
+    paddingHorizontal: 4,
   },
   providerLabel: {
     color: '#334155',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
     marginBottom: 0,
     textTransform: 'uppercase',
@@ -382,7 +373,7 @@ const styles = StyleSheet.create({
   providerButtons: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.96)',
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 3,
     elevation: 4,
   },
@@ -391,16 +382,16 @@ const styles = StyleSheet.create({
   },
   providerButton: {
     overflow: 'hidden',
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderRadius: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    borderRadius: 11,
   },
   providerButtonActive: {
     backgroundColor: '#2563EB',
   },
   providerButtonText: {
     color: '#475569',
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '800',
   },
   providerButtonTextActive: {
@@ -445,23 +436,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
-  },
-  heightLabel: {
-    position: 'absolute',
-    top: 8,
-    left: 12,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-    zIndex: 10,
-  },
-  heightLabelText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  heightLabelTextDark: {
-    color: '#cbd5e1',
   },
 });

@@ -7,8 +7,6 @@ type OverlayStatus = 'started' | 'permission_missing' | 'unavailable' | 'error';
 type OverlayStartPayload = {
   baseUrl: string;
   token: string;
-  userId: number;
-  firebaseUrl: string;
 };
 
 
@@ -25,14 +23,14 @@ type OverlayNativeModule = {
 const overlayModule = NativeModules.OverlayLocationModule as OverlayNativeModule | undefined;
 const isAndroid = Platform.OS === 'android';
 
-const readOverlayConfig = async (): Promise<{ token: string; userId: number }> => {
+const readOverlayConfig = async (): Promise<{ token: string }> => {
   try {
     const storedUser = await AsyncStorage.getItem('user');
     // Also check the standalone 'token' key used by axios interceptor
     const standaloneToken = await AsyncStorage.getItem('token');
 
     if (!storedUser) {
-      return { token: '', userId: 0 };
+      return { token: '' };
     }
 
     const parsed = JSON.parse(storedUser);
@@ -44,22 +42,10 @@ const readOverlayConfig = async (): Promise<{ token: string; userId: number }> =
       parsed?.user?.access_token ??
       '';
 
-    // Firebase responder records are keyed by the authenticated User ID.
-    // `unit_id` identifies the assigned unit, not the responder account.
-    const parsedUserId = Number(
-      parsed?.user?.id ??
-        parsed?.id ??
-        parsed?.user?.unit_id ??
-        parsed?.unit_id
-    );
-
-    return {
-      token,
-      userId: Number.isFinite(parsedUserId) ? parsedUserId : 0,
-    };
+    return { token };
   } catch (error) {
     console.warn('Unable to read overlay auth config:', error);
-    return { token: '', userId: 0 };
+    return { token: '' };
   }
 };
 
@@ -103,29 +89,15 @@ export const startOverlayLocationService = async (): Promise<OverlayStatus> => {
     }
 
     const config = await readOverlayConfig();
-
-    // Get Firebase databaseURL — try multiple sources
-    let firebaseUrl = '';
-    try {
-      const { getApp } = require('@react-native-firebase/app');
-      firebaseUrl = getApp()?.options?.databaseURL ?? '';
-    } catch (e) {
-      console.warn('[OverlayLocation] Failed to get Firebase databaseURL from SDK:', e);
+    if (!config.token) {
+      return 'error';
     }
 
-    // Fallback: hardcoded from google-services.json
-    if (!firebaseUrl) {
-      firebaseUrl = 'https://notification-app-c4e8e-default-rtdb.asia-southeast1.firebasedatabase.app';
-      console.warn('[OverlayLocation] Using hardcoded Firebase RTDB URL fallback.');
-    }
-
-    console.log('[OverlayLocation] Starting with: userId=' + config.userId + ', token=' + (config.token ? 'present' : 'EMPTY') + ', firebaseUrl=' + (firebaseUrl ? 'present' : 'EMPTY'));
+    console.log('[OverlayLocation] Starting authenticated location service.');
 
     await overlayModule!.startOverlay({
       baseUrl: ip,
       token: config.token,
-      userId: config.userId,
-      firebaseUrl,
     });
     return 'started';
   } catch (error) {

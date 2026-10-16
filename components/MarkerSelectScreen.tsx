@@ -12,6 +12,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Icon } from './Icon';
+import { getTheme } from '../src/utils';
 
 export const MARKER_OPTIONS = [
   { key: 'car', label: 'Car', image: require('../assets/markers/car.png') },
@@ -57,13 +58,10 @@ export const MarkerSelectScreen: React.FC<Props> = ({
   );
   const [saving, setSaving] = useState(false);
 
+  const baseTheme = getTheme(isDarkMode);
   const theme = {
-    bg: isDarkMode ? '#0F172A' : '#F1F5F9',
-    surface: isDarkMode ? '#1E293B' : '#FFFFFF',
-    surfaceAlt: isDarkMode ? '#334155' : '#E2E8F0',
-    border: isDarkMode ? '#334155' : '#CBD5E1',
-    text: isDarkMode ? '#F8FAFC' : '#0F172A',
-    textSecondary: isDarkMode ? '#94A3B8' : '#64748B',
+    ...baseTheme,
+    bg: baseTheme.background,
     accent: '#2563EB',
     accentLight: isDarkMode ? 'rgba(37,99,235,0.18)' : 'rgba(37,99,235,0.10)',
   };

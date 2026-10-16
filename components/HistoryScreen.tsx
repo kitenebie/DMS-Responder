@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
+  StatusBar,
   ScrollView,
   Image,
   FlatList,
@@ -300,6 +301,10 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.background }]}
       edges={['top', 'bottom']}>
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
       <View
         style={[
           styles.header,

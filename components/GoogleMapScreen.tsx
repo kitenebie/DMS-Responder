@@ -31,6 +31,22 @@ type MapMessage = {
 
 const DEFAULT_LOCATION = { latitude: 12.706220102613308, longitude: 124.02982096568188 };
 
+const GOOGLE_DARK_MAP_STYLES = [
+  { elementType: 'geometry', stylers: [{ color: '#12263C' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#C5D5E8' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#09182A' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#29425D' }] },
+  { featureType: 'landscape.natural', elementType: 'geometry', stylers: [{ color: '#10243A' }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#183149' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#AFC4DE' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#263D56' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#33516F' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3C648B' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#E2ECF8' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#1C344D' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#07182B' }] },
+];
+
 const normalizeCoordinates = (coords?: { lat: number; lng: number } | null) => {
   if (!coords) return null;
   if (Math.abs(coords.lat) <= 90 && Math.abs(coords.lng) <= 180) return coords;
@@ -40,7 +56,7 @@ const normalizeCoordinates = (coords?: { lat: number; lng: number } | null) => {
   return null;
 };
 
-const createGoogleMapHtml = (apiKey: string, mapId: string) => `<!doctype html>
+const createGoogleMapHtml = (apiKey: string, mapId: string, isDarkMode: boolean) => `<!doctype html>
 <html><head><meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
 <style>html,body,#map{height:100%;width:100%;margin:0;padding:0;background:#e5e7eb}</style></head>
 <body><div id="map"></div><script>
@@ -71,7 +87,7 @@ const createGoogleMapHtml = (apiKey: string, mapId: string) => `<!doctype html>
     // The Google renderer intentionally uses the Maps JavaScript API directly.
     map = new google.maps.Map(document.getElementById('map'), {
       center: { lat: ${DEFAULT_LOCATION.latitude}, lng: ${DEFAULT_LOCATION.longitude} }, zoom: 16,
-      mapId: '${mapId}',
+      ${isDarkMode ? `styles: ${JSON.stringify(GOOGLE_DARK_MAP_STYLES)},` : mapId ? `mapId: ${JSON.stringify(mapId)},` : ''}
       mapTypeId: google.maps.MapTypeId.ROADMAP,
       mapTypeControl: true, mapTypeControlOptions: { position: google.maps.ControlPosition.LEFT_TOP, mapTypeIds: ['roadmap', 'satellite', 'hybrid', 'terrain'] },
       zoomControl: true, zoomControlOptions: { position: google.maps.ControlPosition.LEFT_CENTER },
@@ -125,7 +141,10 @@ const GoogleMapScreen = memo(function GoogleMapScreen({
     () => normalizeCoordinates(incident?.coordinates),
     [incident?.coordinates]
   );
-  const mapHtml = useMemo(() => createGoogleMapHtml(GOOGLE_MAPS_API_KEY, GOOGLE_MAP_ID), []);
+  const mapHtml = useMemo(
+    () => createGoogleMapHtml(GOOGLE_MAPS_API_KEY, GOOGLE_MAP_ID, isDarkMode),
+    [isDarkMode]
+  );
   const fullscreenBottomInset = isFullscreen ? Math.max(insets.bottom, 16) : 0;
 
   const switchToMapLibre = useCallback(
@@ -245,12 +264,14 @@ const GoogleMapScreen = memo(function GoogleMapScreen({
   return (
     <>
       <WebView
+        key={isDarkMode ? 'google-map-dark' : 'google-map-light'}
         ref={webViewRef}
         originWhitelist={['*']}
         source={{ html: mapHtml, baseUrl: 'https://localhost' }}
         javaScriptEnabled
         domStorageEnabled
         onMessage={onMessage}
+        onLoadStart={() => setIsMapReady(false)}
         onError={() => switchToMapLibre('Google Maps page failed to load. MapLibre is now active.')}
         renderLoading={() => (
           <ActivityIndicator style={styles.loading} size="large" color="#2563EB" />

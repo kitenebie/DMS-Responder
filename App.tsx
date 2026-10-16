@@ -32,8 +32,8 @@ import { ActionBar } from './components/ActionBar';
 import { QuickAccess } from './components/QuickAccess';
 import { Icon } from './components/Icon';
 import { navigationRef, navigate } from './components/lib/NavigationService';
-import { getCredentials, login, logout } from './components/lib/auth';
-import { stopLocationUpdates } from './components/lib/axios';
+import { getCredentials, login, logout, refreshLogin } from './components/lib/auth';
+import { api, stopLocationUpdates } from './components/lib/axios';
 import { locationService } from './components/services/locationService';
 import {
   MarkerSelectScreen,
@@ -54,6 +54,7 @@ import {
 } from './src/mockData';
 import { AppState as ResponderAppState, IncidentStatus, Incident, ChatMessage } from './src/types';
 import { RootStackParamList } from './src/navigation/types';
+import { getTheme } from './src/utils';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Background from 'Background';
 import * as Location from 'expo-location';
@@ -64,7 +65,6 @@ import {
 } from './components/services/OverlayLocationService';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import FirebaseNotificationService from './services/FirebaseNotificationService';
-import { saveResponderLocation } from './services/FirebaseLocationService';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -89,6 +89,7 @@ const AppContent = () => {
   const statusTrackerYRef = useRef(0);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const theme = getTheme(isDarkMode);
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(true);
   const [userName, setUserName] = useState(DEFAULT_CONFIG.responder_name);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
@@ -98,7 +99,6 @@ const AppContent = () => {
   const [historyChatTitle, setHistoryChatTitle] = useState('Incident Chat');
   const [currentRoute, setCurrentRoute] = useState<string | undefined>('Home');
   const [selectedMarkerKey, setSelectedMarkerKey] = useState<string | null>(null);
-  const [isNativeLocationServiceActive, setIsNativeLocationServiceActive] = useState(false);
   const [chatPeerTypingByTab, setChatPeerTypingByTab] = useState<Record<ResponderChatParticipant, boolean>>(
     EMPTY_CHAT_PEER_TYPING
   );
@@ -149,6 +149,8 @@ const AppContent = () => {
   const stateRef = useRef(state);
   const chatScreenModeRef = useRef(chatScreenMode);
   const responderTypingSessionRef = useRef<ResponderChatTypingSession | null>(null);
+  const incidentFetchInFlightRef = useRef(false);
+  const dismissedIncomingIncidentIdRef = useRef<string | null>(null);
   const refreshIncomingIncidentRef = useRef<() => Promise<void>>(async () => {});
   const openReportChatFromOverlayRef = useRef<(reportId: number) => Promise<void>>(async () => {});
 
@@ -163,6 +165,8 @@ const AppContent = () => {
 
   const resetIncidentState = useCallback(() => {
     setIncomingIncident(null);
+    dismissedIncomingIncidentIdRef.current = null;
+    setTrackerCurrentStatus('Active');
     setChatScreenMode('live');
     setHistoryChatMessages([]);
     setHistoryChatTitle('Incident Chat');
@@ -249,20 +253,17 @@ const AppContent = () => {
   const syncOverlayStateForAppState = useCallback(
     async (nextState: string) => {
       if (Platform.OS !== 'android') {
-        setIsNativeLocationServiceActive(false);
         return;
       }
 
       if (!isLoggedIn) {
         await stopOverlayLocationService();
-        setIsNativeLocationServiceActive(false);
         return;
       }
 
       if (nextState === 'active') {
-        // Reapply the authenticated user ID even if the service is already running.
+        // Refresh the authenticated token even if the service is already running.
         const startStatus = await startOverlayLocationService();
-        setIsNativeLocationServiceActive(startStatus === 'started');
         if (startStatus !== 'started') {
           return;
         }
@@ -272,7 +273,6 @@ const AppContent = () => {
 
       // App went to background/inactive — refresh its config and show the bubble.
       const startStatus = await startOverlayLocationService();
-      setIsNativeLocationServiceActive(startStatus === 'started');
       if (startStatus !== 'started') {
         return;
       }
@@ -282,41 +282,44 @@ const AppContent = () => {
   );
 
   const refreshIncomingIncident = useCallback(async () => {
-    const incident = await fetchIncomingIncident();
-    const incidentIdNum = Number(incident?.id ?? 0);
-    const hasValidIncident = Number.isFinite(incidentIdNum) && incidentIdNum > 0;
+    if (!isLoggedIn || incidentFetchInFlightRef.current) return;
+    incidentFetchInFlightRef.current = true;
+    try {
+      const incident = await fetchIncomingIncident();
+      const incidentIdNum = Number(incident?.id ?? 0);
+      const hasValidIncident = Number.isFinite(incidentIdNum) && incidentIdNum > 0;
 
-    if (!hasValidIncident) {
-      resetIncidentState();
-      return;
-    }
+      if (!hasValidIncident) {
+        dismissedIncomingIncidentIdRef.current = null;
+        resetIncidentState();
+        return;
+      }
 
-    if (
-      incident.id !== '0' &&
-      incident.id !== 'unknown' &&
-      incident.isAccepted === true &&
-      incident.isAccepted !== null
-    ) {
+      if (dismissedIncomingIncidentIdRef.current !== incident.id) {
+        dismissedIncomingIncidentIdRef.current = null;
+      }
       setIncomingIncident(incident);
-      setState((prev) => ({
-        ...prev,
-        showIncomingModal: false,
-        activeIncident: incident,
-        currentStatus: 'Active',
-      }));
-      return;
-    }
 
-    setIncomingIncident(incident);
-    console.log(`is VALID: ${incident.id}`);
-
-    if (incident.id !== '0' && incident.id !== 'unknown' && incident.isAccepted === false) {
-      setState((prev) => ({
-        ...prev,
-        showIncomingModal: true,
-      }));
+      if (incident.isAccepted === true) {
+        setState((prev) => ({
+          ...prev,
+          showIncomingModal: false,
+          activeIncident: incident,
+          currentStatus: 'Active',
+        }));
+      } else {
+        setState((prev) => ({
+          ...prev,
+          showIncomingModal: dismissedIncomingIncidentIdRef.current !== incident.id,
+        }));
+      }
+    } catch (error) {
+      // A failed poll is not evidence that the active report disappeared.
+      console.warn('Unable to refresh incoming incident; keeping current state:', error);
+    } finally {
+      incidentFetchInFlightRef.current = false;
     }
-  }, [resetIncidentState]);
+  }, [isLoggedIn, resetIncidentState]);
 
   const handleForegroundNotification = useCallback(
     async (remoteMessage: FirebaseMessagingTypes.RemoteMessage) => {
@@ -422,6 +425,7 @@ const AppContent = () => {
     // Keep a cached location that the watcher updates continuously
     let cachedLat = 0;
     let cachedLng = 0;
+    let cachedHeading: number | null = null;
     let hasLocation = false;
 
     // Start watching — this updates cachedLat/Lng every ~1s from GPS hardware
@@ -431,6 +435,7 @@ const AppContent = () => {
         (loc) => {
           cachedLat = loc.latitude;
           cachedLng = loc.longitude;
+          cachedHeading = loc.heading ?? null;
           hasLocation = true;
           if (isMounted) {
             setIsLocationSynced(true);
@@ -443,19 +448,24 @@ const AppContent = () => {
         else sub?.remove();
       });
 
-    // The Android foreground service already writes to Firebase. Keep this as
-    // a paced fallback for platforms/builds where that native service is not active.
-    if (!isNativeLocationServiceActive) {
-      intervalId = setInterval(() => {
-        if (!isMounted || !hasLocation || !currentUserId || isSending) return;
-        isSending = true;
-        saveResponderLocation(currentUserId, cachedLat, cachedLng)
-          .catch(() => {})
-          .finally(() => {
-            isSending = false;
-          });
-      }, 3000);
-    }
+    intervalId = setInterval(() => {
+      if (!isMounted || !hasLocation || !currentUserId || isSending) return;
+      isSending = true;
+      const payload: { lat: number; lng: number; degree?: number } = {
+        lat: cachedLat,
+        lng: cachedLng,
+      };
+      if (typeof cachedHeading === 'number' && Number.isFinite(cachedHeading)) {
+        payload.degree = cachedHeading;
+      }
+      const timeoutId = setTimeout(() => {
+        isSending = false;
+      }, 12000);
+      void Promise.allSettled([api.post('/responder/location', payload)]).finally(() => {
+        clearTimeout(timeoutId);
+        isSending = false;
+      });
+    }, 3000);
 
     return () => {
       isMounted = false;
@@ -464,7 +474,7 @@ const AppContent = () => {
         clearInterval(intervalId);
       }
     };
-  }, [isLoggedIn, currentUserId, isNativeLocationServiceActive]);
+  }, [isLoggedIn, currentUserId]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') {
@@ -501,39 +511,9 @@ const AppContent = () => {
     void FirebaseNotificationService.syncCurrentToken();
   }, [isLoggedIn]);
 
-  // Load status from localStorage on mount
   useEffect(() => {
-    const loadStatusFromStorage = async () => {
-      try {
-        const savedStatus = await AsyncStorage.getItem('currentReportStatus');
-        if (savedStatus && state.activeIncident) {
-          setTrackerCurrentStatus(savedStatus as IncidentStatus);
-        }
-      } catch (error) {
-        console.error('Error loading status from storage:', error);
-      }
-    };
-
-    if (state.activeIncident) {
-      loadStatusFromStorage();
-    }
+    setTrackerCurrentStatus('Active');
   }, [state.activeIncident?.id]);
-
-  // Save status to localStorage whenever it changes
-  useEffect(() => {
-    const saveStatusToStorage = async () => {
-      try {
-        console.log('Saving status to localStorage:', trackerCurrentStatus);
-        await AsyncStorage.setItem('currentReportStatus', trackerCurrentStatus);
-      } catch (error) {
-        console.error('Error saving status to storage:', error);
-      }
-    };
-
-    if (state.activeIncident) {
-      saveStatusToStorage();
-    }
-  }, [trackerCurrentStatus, state.activeIncident?.id]);
 
   // Auto-login on app start
   useEffect(() => {
@@ -542,7 +522,10 @@ const AppContent = () => {
         const credentials = await getCredentials();
         if (credentials && credentials.email && credentials.password) {
           console.log('Auto-login with stored credentials');
-          const userData = await login(credentials.email, credentials.password);
+          const userData = credentials?.email && credentials?.password
+            ? await login(credentials.email, credentials.password, true)
+            : await refreshLogin();
+          await AsyncStorage.removeItem('credentials');
           setUserName(resolveUserName(userData));
           setCurrentUserId(Number(userData?.user?.id ?? userData?.id ?? 0) || null);
           // Check for saved marker before navigating
@@ -563,22 +546,19 @@ const AppContent = () => {
     attemptAutoLogin();
   }, [resolveUserName]);
 
-  // Fetch incoming incident every 1 second
   useEffect(() => {
-    // Initial fetch
+    if (!isLoggedIn) return;
     void refreshIncomingIncident();
-
-    // Set up polling every 1 second
     const intervalId = setInterval(() => {
       void refreshIncomingIncident();
-    }, 1000);
-
-    // Cleanup interval on unmount
+    }, 5000);
     return () => clearInterval(intervalId);
-  }, [refreshIncomingIncident]);
+  }, [isLoggedIn, refreshIncomingIncident]);
 
   const handleAcceptIncident = useCallback(() => {
     if (!incomingIncident) return;
+    dismissedIncomingIncidentIdRef.current = incomingIncident.id;
+    setTrackerCurrentStatus('Active');
     setState((prev) => ({
       ...prev,
       showIncomingModal: false,
@@ -589,11 +569,12 @@ const AppContent = () => {
   }, [incomingIncident]);
 
   const handleDismissIncident = useCallback(() => {
+    dismissedIncomingIncidentIdRef.current = incomingIncident?.id ?? null;
     setState((prev) => ({
       ...prev,
       showIncomingModal: false,
     }));
-  }, []);
+  }, [incomingIncident?.id]);
 
   const handleUpdateStatus = useCallback(
     (newStatus: IncidentStatus) => {
@@ -841,7 +822,6 @@ const AppContent = () => {
     await logout();
     stopLocationUpdates();
     await stopOverlayLocationService();
-    setIsNativeLocationServiceActive(false);
     resetIncidentState();
     setState((prev) => ({
       ...prev,
@@ -1078,17 +1058,9 @@ const AppContent = () => {
         ? 'Dispatcher conversation'
         : 'Citizen conversation';
 
-  const theme = {
-    background: isDarkMode ? '#0F172A' : '#F8FAFC',
-    surface: isDarkMode ? '#1E293B' : '#FFFFFF',
-    surfaceAlt: isDarkMode ? '#334155' : '#E2E8F0',
-    text: isDarkMode ? '#F8FAFC' : '#0F172A',
-    textSecondary: isDarkMode ? '#94A3B8' : '#475569',
-    border: isDarkMode ? '#334155' : '#E2E8F0',
-  };
   const isStatusCompleted = trackerCurrentStatus === 'Completed';
   const mapShouldBeFullscreen = state.isMapFullscreen;
-  const portraitMapHeight = Math.min(Math.max(screenHeight * 0.34, 480), 480);
+  const portraitMapHeight = Math.min(Math.max(screenHeight * 0.4, 280), 440);
   const [isMovingBearingEnabled, setIsMovingBearingEnabled] = useState(false);
   const [mapProvider, setMapProvider] = useState<MapProvider>('google');
   const [isFollowingUser, setIsFollowingUser] = useState(true);
@@ -1141,7 +1113,6 @@ const AppContent = () => {
             const currentStatus = getCurrentStatus(statusData);
             console.log('Fetched currentStatus:', currentStatus);
             handleUpdateStatus(currentStatus);
-            await AsyncStorage.setItem('currentReportStatus', currentStatus);
           }
         }
       } catch (error) {
@@ -1175,10 +1146,10 @@ const AppContent = () => {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
-            backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC',
+            backgroundColor: theme.background,
           }}>
           <ActivityIndicator size="large" color={DEFAULT_CONFIG.primary_color} />
-          <Text style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A', marginTop: 16 }}>
+          <Text style={{ color: theme.text, marginTop: 16 }}>
             Checking login status...
           </Text>
         </View>
@@ -1204,12 +1175,12 @@ const AppContent = () => {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
-            backgroundColor: isDarkMode ? '#0F172A' : '#F8FAFC',
+            backgroundColor: theme.background,
           }}>
           <ActivityIndicator size="large" color={DEFAULT_CONFIG.primary_color} />
           <Text
             style={{
-              color: isDarkMode ? '#F8FAFC' : '#0F172A',
+              color: theme.text,
               marginTop: 16,
               fontWeight: 'bold',
             }}>
@@ -1250,20 +1221,28 @@ const AppContent = () => {
         overlay && styles.headerOverlay,
       ]}>
       <View style={styles.headerLeft}>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Icon name="logout" size={20} color={theme.text} />
-        </TouchableOpacity>
         <View style={[styles.headerIcon, { backgroundColor: DEFAULT_CONFIG.primary_color }]}>
           <Image source={require('./assets/icon.png')} style={styles.headerLogo} />
         </View>
-        <View>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>
+        <View style={styles.headerIdentity}>
+          <Text style={[styles.headerTitle, { color: theme.text }]} numberOfLines={1}>
             {DEFAULT_CONFIG.app_title}
           </Text>
-          <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>{userName}</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]} numberOfLines={1}>
+            {userName}
+          </Text>
+          <View style={[styles.headerRole, { backgroundColor: isDarkMode ? '#0B2852' : '#DBEAFE' }]}>
+            <Icon name="walk" size={14} color="#2788FF" />
+            <Text style={styles.headerRoleText}>Responder</Text>
+          </View>
         </View>
       </View>
       <View style={styles.headerRight}>
+        <TouchableOpacity
+          onPress={handleLogout}
+          style={[styles.logoutButton, { backgroundColor: theme.surfaceAlt }]}>
+          <Icon name="logout" size={17} color={theme.text} />
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={handleToggleTheme}
           style={[styles.themeButton, { backgroundColor: theme.surfaceAlt }]}>
@@ -1306,9 +1285,38 @@ const AppContent = () => {
         styles.heroMetricCard,
         { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
       ]}>
-      <Text style={[styles.heroMetricLabel, { color: theme.textSecondary }]}>{label}</Text>
+      <View
+        style={[
+          styles.metricIcon,
+          {
+            backgroundColor:
+              label === 'Status'
+                ? isDarkMode
+                  ? '#063B3A'
+                  : '#D8F6EE'
+                : isDarkMode
+                  ? '#0B2852'
+                  : '#DBEAFE',
+          },
+        ]}>
+        <Icon
+          name={label === 'Status' ? 'check' : label === 'Responder' ? 'walk' : 'clock'}
+          size={21}
+          color={label === 'Status' ? '#11D6BE' : '#2788FF'}
+        />
+      </View>
+      <Text
+        style={[
+          styles.heroMetricLabel,
+          { color: label === 'Status' ? '#11D6BE' : theme.textSecondary },
+        ]}>
+        {label}
+      </Text>
       <Text style={[styles.heroMetricValue, { color: theme.text }]} numberOfLines={2}>
         {value}
+      </Text>
+      <Text style={[styles.heroMetricDetail, { color: theme.textSecondary }]} numberOfLines={1}>
+        {label === 'Status' ? 'Ready to respond' : label === 'Responder' ? 'On duty' : 'Just now'}
       </Text>
     </View>
   );
@@ -1348,7 +1356,10 @@ const AppContent = () => {
           style={[{ flex: 1 }, state.isMapFullscreen ? { display: 'none' } : { display: 'flex' }]}>
           <Background />
           <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-            <StatusBar />
+            <StatusBar
+              barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+              backgroundColor={theme.background}
+            />
             {renderHeader()}
 
             <ScrollView
@@ -1360,92 +1371,120 @@ const AppContent = () => {
               ]}
               showsVerticalScrollIndicator={false}
               scrollEnabled={!isMapInteracting}>
-              <View
-                style={[
-                  styles.heroCard,
-                  { backgroundColor: theme.surface, borderColor: theme.surfaceAlt },
-                ]}>
-                <View style={styles.heroMetaRow}>
-                  <View
-                    style={[
-                      styles.heroMetaChip,
-                      { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
-                    ]}>
-                    <Icon name="document" size={14} color={DEFAULT_CONFIG.primary_color} />
-                    <Text style={[styles.heroMetaText, { color: theme.text }]}>
-                      {state.activeIncident ? `Report #${state.activeIncident.id}` : 'Standby Mode'}
-                    </Text>
+              <View style={styles.homeStack}>
+                <View style={styles.operationCards}>
+                  <View style={[styles.operationCard, styles.operationCardReady]}>
+                    <View style={[styles.operationIcon, { backgroundColor: isDarkMode ? '#052D35' : '#D8F6EE' }]}>
+                      <Icon name="layers" size={25} color="#11D6BE" />
+                    </View>
+                    <View style={styles.operationCopy}>
+                      <Text style={[styles.operationLabel, { color: theme.textSecondary }]}>
+                        Operation mode
+                      </Text>
+                      <Text
+                        style={[styles.operationTitle, { color: theme.text }]}
+                        numberOfLines={1}>
+                        {state.activeIncident ? 'Responding' : 'Standby Mode'}
+                      </Text>
+                      <Text
+                        style={[styles.operationSubtitle, { color: theme.textSecondary }]}
+                        numberOfLines={1}>
+                        {state.activeIncident
+                          ? `Report #${state.activeIncident.id}`
+                          : 'Ready for deployment'}
+                      </Text>
+                    </View>
                   </View>
 
-                  <View
-                    style={[
-                      styles.heroMetaChip,
-                      { backgroundColor: theme.background, borderColor: theme.surfaceAlt },
-                    ]}>
-                    <Icon name="clock" size={14} color={DEFAULT_CONFIG.primary_color} />
-                    <Text style={[styles.heroMetaText, { color: theme.text }]}>
-                      {state.activeIncident
-                        ? formatIncidentTime(state.activeIncident.timeReported)
-                        : 'Live map ready'}
-                    </Text>
+                  <View style={[styles.operationCard, styles.operationCardMap]}>
+                    <View style={[styles.operationIcon, { backgroundColor: isDarkMode ? '#0B2852' : '#DBEAFE' }]}>
+                      <Icon name="my-location" size={25} color="#2788FF" />
+                    </View>
+                    <View style={styles.operationCopy}>
+                      <Text style={[styles.operationLabel, { color: theme.textSecondary }]}>
+                        Live map
+                      </Text>
+                      <Text
+                        style={[styles.operationTitle, { color: theme.text }]}
+                        numberOfLines={1}>
+                        {isLocationSynced ? 'Ready' : 'Connecting'}
+                      </Text>
+                      <Text
+                        style={[styles.operationSubtitle, { color: theme.textSecondary }]}
+                        numberOfLines={1}>
+                        {isLocationSynced ? 'Tracking active' : 'Syncing location'}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.liveDot,
+                        { backgroundColor: isLocationSynced ? '#11D6BE' : '#F59E0B' },
+                      ]}
+                    />
                   </View>
                 </View>
 
-                <Map
-                  isDarkMode={isDarkMode}
-                  isFullscreen={false}
-                  isActive={!state.isMapFullscreen}
-                  incident={state.activeIncident}
-                  onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
-                  onRestoreSize={() => {}}
-                  onMapPress={() => setIsMapInteracting(true)}
-                  onMapRelease={() => setIsMapInteracting(false)}
-                  showFullscreenToggle={!isStatusCompleted}
-                  mapHeight={portraitMapHeight}
-                  containerStyle={styles.heroMap}
-                  isMovingBearingEnabled={isMovingBearingEnabled}
-                onMovingBearingChange={setIsMovingBearingEnabled}
-                isFollowingUser={isFollowingUser}
-                onFollowingUserChange={setIsFollowingUser}
-                  markerKey={selectedMarkerKey}
-                  mapProvider={mapProvider}
-                  onMapProviderChange={setMapProvider}
-                />
+                <View
+                  style={[
+                    styles.mapPanel,
+                    { borderColor: theme.border, backgroundColor: theme.background },
+                  ]}>
+                  <Map
+                    isDarkMode={isDarkMode}
+                    isFullscreen={false}
+                    isActive={!state.isMapFullscreen}
+                    incident={state.activeIncident}
+                    onToggleFullscreen={isStatusCompleted ? () => {} : handleToggleMapFullscreen}
+                    onRestoreSize={() => {}}
+                    onMapPress={() => setIsMapInteracting(true)}
+                    onMapRelease={() => setIsMapInteracting(false)}
+                    showFullscreenToggle={!isStatusCompleted}
+                    mapHeight={portraitMapHeight}
+                    containerStyle={styles.heroMap}
+                    isMovingBearingEnabled={isMovingBearingEnabled}
+                    onMovingBearingChange={setIsMovingBearingEnabled}
+                    isFollowingUser={isFollowingUser}
+                    onFollowingUserChange={setIsFollowingUser}
+                    markerKey={selectedMarkerKey}
+                    mapProvider={mapProvider}
+                    onMapProviderChange={setMapProvider}
+                  />
+                </View>
+              </View>
 
-                {/* Action Buttons - Show only when there's an active incident */}
-                {state.activeIncident && nextStatusButton && (
-                  <View
-                    style={styles.actionButtonsContainer}
-                    key={`buttons-${nextStatusButton.label}`}>
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: nextStatusButton.color }]}
-                      onPress={handleNextStatus}>
-                      <Icon name={nextStatusButton.icon as any} size={20} color="#fff" />
-                      <Text style={styles.actionButtonText}>{nextStatusButton.label}</Text>
-                    </TouchableOpacity>
+              {/* Action Buttons - Show only when there's an active incident */}
+              {state.activeIncident && nextStatusButton && (
+                <View
+                  style={styles.actionButtonsContainer}
+                  key={`buttons-${nextStatusButton.label}`}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: nextStatusButton.color }]}
+                    onPress={handleNextStatus}>
+                    <Icon name={nextStatusButton.icon as any} size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>{nextStatusButton.label}</Text>
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      style={[styles.actionButton, { backgroundColor: '#10B981' }]}
-                      onPress={handleOpenChat}>
-                      <Icon name="chat" size={20} color="#fff" />
-                      <Text style={styles.actionButtonText}>Chats</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+                    onPress={handleOpenChat}>
+                    <Icon name="chat" size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>Chats</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <View style={[styles.heroMetricsRow, styles.homeMetrics]}>
+                {renderHeroMetric(
+                  'Status',
+                  state.activeIncident ? trackerCurrentStatus : 'Available'
                 )}
-
-                <View style={styles.heroMetricsRow}>
-                  {renderHeroMetric(
-                    'Status',
-                    state.activeIncident ? trackerCurrentStatus : 'Available'
-                  )}
-                  {renderHeroMetric('Responder', userName)}
-                  {renderHeroMetric(
-                    'Last Update',
-                    state.activeIncident
-                      ? formatIncidentTime(state.activeIncident.timeReported)
-                      : 'Monitoring'
-                  )}
-                </View>
+                {renderHeroMetric('Responder', userName)}
+                {renderHeroMetric(
+                  'Last Update',
+                  state.activeIncident
+                    ? formatIncidentTime(state.activeIncident.timeReported)
+                    : 'Monitoring'
+                )}
               </View>
 
               {state.activeIncident ? (
@@ -1645,6 +1684,7 @@ const AppContent = () => {
         <IncomingModal
           visible={state.showIncomingModal}
           incident={incomingIncident}
+          isDarkMode={isDarkMode}
           onAccept={handleAcceptIncident}
           onDismiss={handleDismissIncident}
         />
@@ -1675,9 +1715,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderBottomWidth: 0,
+    backgroundColor: 'transparent',
   },
   headerOverlay: {
     position: 'absolute',
@@ -1687,46 +1728,71 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   headerLeft: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  headerIdentity: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  headerRole: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    backgroundColor: '#0B2852',
+  },
+  headerRoleText: {
+    color: '#2788FF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   logoutButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 40,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#1D70D4',
   },
   headerLogo: {
-    width: 40,
-    height: 40,
+    width: 64,
+    height: 64,
     borderRadius: 40,
     resizeMode: 'contain',
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 22,
     fontWeight: '700',
   },
   headerSubtitle: {
-    fontSize: 9,
+    fontSize: 14,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   themeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1741,9 +1807,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   markerPickerBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1751,91 +1817,99 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainContentContainer: {
-    padding: 16,
-    gap: 16,
-  },
-  heroCard: {
-    borderRadius: 22,
-    borderWidth: 1,
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 14,
     gap: 14,
-    shadowColor: '#020617',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
   },
-  heroHeaderBlock: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  heroCopy: {
-    flex: 1,
-    gap: 4,
-  },
-  heroEyebrow: {
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  heroTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 28,
-  },
-  heroSubtitle: {
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  heroStatusPill: {
-    minWidth: 88,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroStatusPillText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  heroMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  heroMetaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  heroMetaText: {
-    fontSize: 12,
-    fontWeight: '600',
+  homeStack: {
+    gap: 14,
   },
   heroMap: {
-    borderRadius: 18,
+    borderRadius: 16,
   },
-  heroMetricsRow: {
+  operationCards: {
     flexDirection: 'row',
     gap: 10,
   },
+  operationCard: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 90,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 19,
+    borderWidth: 1,
+  },
+  operationCardReady: {
+    backgroundColor: 'rgba(0, 192, 170, 0.08)',
+    borderColor: '#00A995',
+  },
+  operationCardMap: {
+    backgroundColor: 'rgba(25, 111, 220, 0.09)',
+    borderColor: '#1670D4',
+  },
+  operationIcon: {
+    width: 54,
+    height: 54,
+    flexShrink: 0,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  operationCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  operationLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  operationTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  operationSubtitle: {
+    fontSize: 10,
+  },
+  liveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  mapPanel: {
+    padding: 10,
+    borderWidth: 1,
+    borderRadius: 22,
+  },
+  heroMetricsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  homeMetrics: {
+    marginTop: 14,
+  },
   heroMetricCard: {
     flex: 1,
-    minHeight: 78,
-    borderRadius: 16,
+    minHeight: 142,
+    borderRadius: 18,
     borderWidth: 1,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    justifyContent: 'space-between',
+    paddingVertical: 14,
+    gap: 4,
+  },
+  metricIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 3,
   },
   heroMetricLabel: {
     fontSize: 11,
@@ -1844,9 +1918,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   heroMetricValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 19,
+  },
+  heroMetricDetail: {
+    fontSize: 12,
   },
   sectionHeaderBlock: {
     gap: 2,

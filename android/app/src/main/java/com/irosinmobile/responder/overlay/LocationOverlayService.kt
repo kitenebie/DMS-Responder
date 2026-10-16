@@ -45,11 +45,10 @@ class LocationOverlayService : Service() {
   private var overlayLayoutParams: WindowManager.LayoutParams? = null
   private var foregroundStarted = false
   private var wakeLock: PowerManager.WakeLock? = null
-  private var lastFirebaseSendTimeMs: Long = 0L
   private var lastMySqlSendTimeMs: Long = 0L
   private var tickCount = 0L
-  private val firebaseWriteInFlight = AtomicBoolean(false)
   private val serverWriteInFlight = AtomicBoolean(false)
+  @Volatile private var serverWriteBlocked = false
 
   // Continuously updated by requestLocationUpdates
   @Volatile private var cachedLat: Double = 0.0
@@ -72,26 +71,20 @@ class LocationOverlayService : Service() {
     const val ACTION_SET_VISIBILITY = "overlay_location_action_set_visibility"
     const val EXTRA_BASE_URL = "extra_base_url"
     const val EXTRA_TOKEN = "extra_token"
-    const val EXTRA_USER_ID = "extra_user_id"
     const val EXTRA_OVERLAY_VISIBLE = "extra_overlay_visible"
-    const val EXTRA_FIREBASE_URL = "extra_firebase_url"
 
     private const val PREFS_NAME = "overlay_location_preferences"
     private const val PREF_BASE_URL = "base_url"
     private const val PREF_TOKEN = "token"
-    private const val PREF_USER_ID = "user_id"
     private const val PREF_OVERLAY_VISIBLE = "overlay_visible"
     private const val PREF_PENDING_SCREEN = "pending_screen"
     private const val PREF_PENDING_REPORT_ID = "pending_report_id"
     private const val PREF_LAST_REPORT_ID = "last_report_id"
-    private const val PREF_FIREBASE_URL = "firebase_url"
     private const val CHANNEL_ID = "overlay_location_channel"
     private const val NOTIFICATION_ID = 4051
-    private const val FIREBASE_THROTTLE_MS = 2_000L
     private const val MYSQL_THROTTLE_MS = 15_000L
     private const val TICK_INTERVAL_MS = 1_000L
     private const val WAKE_LOCK_TAG = "Responder:OverlayLocationServiceWakeLock"
-    private const val HARDCODED_FIREBASE_URL = "https://notification-app-c4e8e-default-rtdb.asia-southeast1.firebasedatabase.app"
 
     private val running = AtomicBoolean(false)
 
@@ -159,17 +152,18 @@ class LocationOverlayService : Service() {
     }
 
     // Persist config
-    if (intent != null) persistConfig(intent)
-    ensureFirebaseUrl()
+    if (intent != null) {
+      persistConfig(intent)
+      serverWriteBlocked = false
+    }
 
     // Log config
     val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val userId = prefs.getInt(PREF_USER_ID, 0)
-    val fbUrl = prefs.getString(PREF_FIREBASE_URL, "")?.trim().orEmpty()
-    android.util.Log.i("LocationOverlayService", "[CONFIG] userId=$userId | firebase=${fbUrl.take(50)} | perm=${hasLocationPermission()}")
+    val token = prefs.getString(PREF_TOKEN, "").orEmpty()
+    android.util.Log.i("LocationOverlayService", "[CONFIG] token=${if (token.isBlank()) "missing" else "present"} | perm=${hasLocationPermission()}")
 
-    if (userId <= 0 && intent == null) {
-      android.util.Log.e("LocationOverlayService", "No userId after resurrection. Stopping.")
+    if (token.isBlank() && intent == null) {
+      android.util.Log.e("LocationOverlayService", "No auth token after resurrection. Stopping.")
       stopSelf()
       return START_NOT_STICKY
     }
@@ -280,28 +274,11 @@ class LocationOverlayService : Service() {
 
     val now = System.currentTimeMillis()
 
-    // Never queue multiple Firebase requests when a connection is slow.
     val pool = networkPool
-    if (
-      now - lastFirebaseSendTimeMs >= FIREBASE_THROTTLE_MS &&
-      pool != null &&
-      !pool.isShutdown &&
-      firebaseWriteInFlight.compareAndSet(false, true)
-    ) {
-      lastFirebaseSendTimeMs = now
-      pool.execute {
-        try {
-          writeToFirebase(lat, lng)
-        } catch (t: Throwable) {
-          android.util.Log.e("LocationOverlayService", "[Firebase] Network thread error: ${t.message}")
-        } finally {
-          firebaseWriteInFlight.set(false)
-        }
-      }
-    }
-
     // Server write — throttled and limited to one in-flight request.
     if (
+      !serverWriteBlocked &&
+      !isAppInForeground() &&
       now - lastMySqlSendTimeMs >= MYSQL_THROTTLE_MS &&
       pool != null &&
       !pool.isShutdown &&
@@ -388,37 +365,6 @@ class LocationOverlayService : Service() {
   }
 
   // ==========================================================
-  // FIREBASE WRITE
-  // ==========================================================
-
-  private fun writeToFirebase(lat: Double, lng: Double) {
-    val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    val firebaseUrl = (prefs.getString(PREF_FIREBASE_URL, HARDCODED_FIREBASE_URL) ?: HARDCODED_FIREBASE_URL).trim().trimEnd('/')
-    val userId = prefs.getInt(PREF_USER_ID, 0)
-    if (userId <= 0) { android.util.Log.w("LocationOverlayService", "[Firebase] skip: userId=0"); return }
-
-    val endpoint = "$firebaseUrl/responders/$userId.json"
-    val ts = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
-      .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
-    val payload = """{"location":{"latitude":$lat,"longitude":$lng,"updatedAt":"$ts"},"updatedAt":"$ts"}"""
-
-    var conn: HttpURLConnection? = null
-    try {
-      conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-        requestMethod = "PUT"; connectTimeout = 30_000; readTimeout = 30_000
-        doOutput = true; setRequestProperty("Content-Type", "application/json")
-      }
-      conn.outputStream.use { it.write(payload.toByteArray()) }
-      val code = conn.responseCode
-      android.util.Log.i("LocationOverlayService", "[Firebase] ✅ $code | tick#$tickCount | id=$userId | $lat,$lng | $ts")
-    } catch (e: Throwable) {
-      android.util.Log.e("LocationOverlayService", "[Firebase] ❌ tick#$tickCount | ${e.javaClass.simpleName}: ${e.message}")
-    } finally {
-      try { conn?.disconnect() } catch (_: Throwable) {}
-    }
-  }
-
-  // ==========================================================
   // SERVER WRITE
   // ==========================================================
 
@@ -438,7 +384,9 @@ class LocationOverlayService : Service() {
         if (token.isNotBlank()) setRequestProperty("Authorization", if (token.startsWith("Bearer ")) token else "Bearer $token")
       }
       conn.outputStream.use { it.write(payload.toByteArray()) }
-      android.util.Log.d("LocationOverlayService", "[Server] ${conn.responseCode} | $lat,$lng")
+      val code = conn.responseCode
+      if (code == 401 || code == 403) serverWriteBlocked = true
+      android.util.Log.d("LocationOverlayService", "[Server] HTTP $code")
     } catch (e: Throwable) {
       android.util.Log.e("LocationOverlayService", "[Server] ❌ ${e.message}")
     } finally {
@@ -455,14 +403,7 @@ class LocationOverlayService : Service() {
     val ed = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
     if (intent.hasExtra(EXTRA_BASE_URL)) ed.putString(PREF_BASE_URL, intent.getStringExtra(EXTRA_BASE_URL)?.trim()?.trimEnd('/') ?: "")
     if (intent.hasExtra(EXTRA_TOKEN)) ed.putString(PREF_TOKEN, intent.getStringExtra(EXTRA_TOKEN)?.trim() ?: "")
-    if (intent.hasExtra(EXTRA_USER_ID)) { val v = intent.getIntExtra(EXTRA_USER_ID, 0); if (v > 0) ed.putInt(PREF_USER_ID, v) else ed.remove(PREF_USER_ID) }
-    if (intent.hasExtra(EXTRA_FIREBASE_URL)) { val v = intent.getStringExtra(EXTRA_FIREBASE_URL)?.trim() ?: ""; ed.putString(PREF_FIREBASE_URL, v.ifBlank { HARDCODED_FIREBASE_URL }) }
     ed.apply()
-  }
-
-  private fun ensureFirebaseUrl() {
-    val p = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    if ((p.getString(PREF_FIREBASE_URL, "") ?: "").isBlank()) p.edit().putString(PREF_FIREBASE_URL, HARDCODED_FIREBASE_URL).apply()
   }
 
   // ==========================================================
@@ -532,7 +473,7 @@ class LocationOverlayService : Service() {
   }
 
   private fun createNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
-    .setSmallIcon(R.drawable.ic_notification_irorescue).setContentTitle("Responder active").setContentText("Location → Firebase every 1s")
+    .setSmallIcon(R.drawable.ic_notification_irorescue).setContentTitle("Responder active").setContentText("Authenticated location sync active")
     .setPriority(NotificationCompat.PRIORITY_LOW).setOngoing(true).setOnlyAlertOnce(true)
     .setContentIntent(packageManager.getLaunchIntentForPackage(packageName)?.let { PendingIntent.getActivity(this,9001,it,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE) })
     .addAction(R.mipmap.ic_launcher,"Stop",PendingIntent.getService(this,9002,Intent(this,LocationOverlayService::class.java).apply{action=ACTION_STOP},PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))

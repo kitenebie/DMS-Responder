@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Modal, Image, TextInput, Acti
 import { useAudioPlayer } from 'expo-audio';
 import { Incident } from '@/types';
 import { formatTime } from '@/utils';
+import { getTheme } from '../src/utils';
 import { Icon } from './Icon';
 import { acceptIncident, declineIncident } from '@/mockData';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 interface IncomingModalProps {
   visible: boolean;
   incident: Incident;
+  isDarkMode: boolean;
   onAccept: () => void;
   onDismiss: () => void;
 }
@@ -17,6 +19,7 @@ interface IncomingModalProps {
 export const IncomingModal: React.FC<IncomingModalProps> = ({
   visible,
   incident,
+  isDarkMode,
   onAccept,
   onDismiss,
 }) => {
@@ -27,6 +30,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
   const [showFullImage, setShowFullImage] = useState(false);
   const player = useAudioPlayer(require('../assets/alert.mp3'));
   const pulseAnim = useRef(new Animated.Value(0)).current;
+  const theme = getTheme(isDarkMode);
 
   useEffect(() => {
     if (!visible) return;
@@ -171,7 +175,7 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
               },
             ]}
           />
-          <View style={styles.modal}>
+          <View style={[styles.modal, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerIconContainer}>
@@ -185,10 +189,10 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
 
           {/* Report Attachment */}
           {incident.report_attachment && (
-            <View style={styles.infoCard}>
+            <View style={[styles.infoCard, { backgroundColor: theme.surfaceAlt }]}>
               <View style={styles.infoCardHeader}>
                 <Icon name="image" size={16} color="#60A5FA" />
-                <Text style={styles.infoLabel}>Attachment</Text>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Attachment</Text>
               </View>
               <TouchableOpacity onPress={() => setShowFullImage(true)}>
                 <Image
@@ -204,41 +208,41 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
           <View style={styles.content}>
             {/* Type and Time Grid */}
             <View style={styles.gridRow}>
-              <View style={[styles.infoCard, styles.gridItem]}>
+              <View style={[styles.infoCard, styles.gridItem, { backgroundColor: theme.surfaceAlt }]}>
                 <View style={styles.infoCardHeader}>
                   <Icon name="bolt" size={16} color="#FBBF24" />
-                  <Text style={styles.infoLabel}>Type</Text>
+                  <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Type</Text>
                 </View>
-                <Text style={styles.infoValueSmall}>{incident.type}</Text>
+                <Text style={[styles.infoValueSmall, { color: theme.text }]}>{incident.type}</Text>
               </View>
 
-              <View style={[styles.infoCard, styles.gridItem]}>
+              <View style={[styles.infoCard, styles.gridItem, { backgroundColor: theme.surfaceAlt }]}>
                 <View style={styles.infoCardHeader}>
                   <Icon name="clock" size={16} color="#4ADE80" />
-                  <Text style={styles.infoLabel}>Time</Text>
+                  <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Time</Text>
                 </View>
-                <Text style={styles.infoValueSmall}>
+                <Text style={[styles.infoValueSmall, { color: theme.text }]}>
                   {incident.timeReported ? formatTime(incident.timeReported) : 'N/A'}
                 </Text>
               </View>
             </View>
 
             {/* Location */}
-            <View style={styles.infoCard}>
+            <View style={[styles.infoCard, { backgroundColor: theme.surfaceAlt }]}>
               <View style={styles.infoCardHeader}>
                 <Icon name="location" size={16} color="#F87171" />
-                <Text style={styles.infoLabel}>Location</Text>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Location</Text>
               </View>
-              <Text style={styles.infoValue}>{incident.location}</Text>
+              <Text style={[styles.infoValue, { color: theme.text }]}>{incident.location}</Text>
             </View>
 
             {/* Description */}
-            <View style={styles.infoCard}>
+            <View style={[styles.infoCard, { backgroundColor: theme.surfaceAlt }]}>
               <View style={styles.infoCardHeader}>
                 <Icon name="info" size={16} color="#C084FC" />
-                <Text style={styles.infoLabel}>Description</Text>
+                <Text style={[styles.infoLabel, { color: theme.textSecondary }]}>Description</Text>
               </View>
-              <Text style={styles.descriptionText}>{incident.description}</Text>
+              <Text style={[styles.descriptionText, { color: theme.text }]}>{incident.description}</Text>
             </View>
 
             {/* Error Message */}
@@ -251,9 +255,9 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
             {/* Decline Reason Input */}
             {showDeclineOptions && (
               <View style={styles.declineContainer}>
-                <Text style={styles.declineLabel}>Reason for declining:</Text>
+                <Text style={[styles.declineLabel, { color: theme.textSecondary }]}>Reason for declining:</Text>
                 <TextInput
-                  style={styles.declineInput}
+                  style={[styles.declineInput, { backgroundColor: theme.surfaceAlt, color: theme.text }]}
                   placeholder="Enter decline reason..."
                   placeholderTextColor="#9CA3AF"
                   value={declineReason}
@@ -272,9 +276,9 @@ export const IncomingModal: React.FC<IncomingModalProps> = ({
               <>
                 <TouchableOpacity
                   onPress={() => setShowDeclineOptions(false)}
-                  style={styles.cancelButton}
+                  style={[styles.cancelButton, { backgroundColor: theme.surfaceAlt }]}
                   disabled={isLoading}>
-                  <Text style={styles.cancelButtonText}>Back</Text>
+                  <Text style={[styles.cancelButtonText, { color: theme.text }]}>Back</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={handleDecline}

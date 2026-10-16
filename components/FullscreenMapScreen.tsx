@@ -72,7 +72,10 @@ export const FullscreenMapScreen: React.FC<FullscreenMapScreenProps> = ({
 
   return (
     <View style={[styles.fullscreenContainer, { backgroundColor: theme.background }]}>
-      <StatusBar />
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
       <View style={styles.headerSlot}>{headerComponent}</View>
       <View
         style={[styles.mapSlot, { marginBottom: mapBottomOffset }]}

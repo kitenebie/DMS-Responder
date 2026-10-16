@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
+  StatusBar,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -197,6 +198,10 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.background }]}
       edges={['top', 'bottom']}>
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={keyboardOffset}

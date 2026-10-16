@@ -25,14 +25,14 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
     {
       id: 'light-background',
       type: 'background',
-      paint: { 'background-color': '#f2f3f0' },
+      paint: { 'background-color': '#F8FAFC' },
     },
     {
       id: 'light-park',
       type: 'fill',
       source: 'openmaptiles',
       'source-layer': 'park',
-      paint: { 'fill-color': '#e2eadf' },
+      paint: { 'fill-color': '#E3F2E6' },
     },
     {
       id: 'light-landcover-wood',
@@ -42,7 +42,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       minzoom: 9,
       filter: ['==', ['get', 'class'], 'wood'],
       paint: {
-        'fill-color': '#dce4dc',
+        'fill-color': '#D6E9DC',
         'fill-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.25, 12, 0.8],
       },
     },
@@ -52,14 +52,14 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       source: 'openmaptiles',
       'source-layer': 'water',
       filter: ['!=', ['get', 'brunnel'], 'tunnel'],
-      paint: { 'fill-color': '#c2d8e8' },
+      paint: { 'fill-color': '#D6EAF8' },
     },
     {
       id: 'light-waterway',
       type: 'line',
       source: 'openmaptiles',
       'source-layer': 'waterway',
-      paint: { 'line-color': '#b4cfdf', 'line-width': 1 },
+      paint: { 'line-color': '#B7D9F0', 'line-width': 1 },
     },
     {
       id: 'light-buildings',
@@ -68,8 +68,8 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       'source-layer': 'building',
       minzoom: 12,
       paint: {
-        'fill-color': '#e4e2dc',
-        'fill-outline-color': '#d4d1ca',
+        'fill-color': '#E8EEF5',
+        'fill-outline-color': '#D4E0EC',
       },
     },
     {
@@ -81,7 +81,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       filter: ['==', ['get', 'class'], 'path'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#deddda',
+        'line-color': '#C5D4E3',
         'line-width': ['interpolate', ['exponential', 1.2], ['zoom'], 13, 1, 20, 9],
       },
     },
@@ -94,7 +94,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       filter: ['match', ['get', 'class'], ['minor', 'service', 'track'], true, false],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ffffff',
+        'line-color': '#F8FAFC',
         'line-width': ['interpolate', ['exponential', 1.45], ['zoom'], 12, 1, 20, 18],
       },
     },
@@ -113,7 +113,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#d1cfc9',
+        'line-color': '#C5D4E3',
         'line-width': ['interpolate', ['exponential', 1.3], ['zoom'], 6, 1, 12, 4, 20, 24],
       },
     },
@@ -132,7 +132,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       ],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#ffffff',
+        'line-color': '#F8FAFC',
         'line-width': ['interpolate', ['exponential', 1.3], ['zoom'], 6, 0.5, 12, 3, 20, 20],
       },
     },
@@ -145,7 +145,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       filter: ['==', ['get', 'class'], 'motorway'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#d8b89a',
+        'line-color': '#8DB5DB',
         'line-width': ['interpolate', ['exponential', 1.35], ['zoom'], 5, 1, 12, 5, 20, 30],
       },
     },
@@ -158,7 +158,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       filter: ['==', ['get', 'class'], 'motorway'],
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#f7dfc5',
+        'line-color': '#BDD9F1',
         'line-width': ['interpolate', ['exponential', 1.35], ['zoom'], 5, 0.5, 12, 3.5, 20, 26],
       },
     },
@@ -169,7 +169,7 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
       'source-layer': 'boundary',
       filter: ['!=', ['get', 'maritime'], 1],
       paint: {
-        'line-color': '#a6a6a6',
+        'line-color': '#94A3B8',
         'line-dasharray': [2, 2],
         'line-opacity': 0.65,
         'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 12, 1.5],
@@ -195,8 +195,8 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
         'text-size': ['interpolate', ['linear'], ['zoom'], 12, 11, 17, 14],
       },
       paint: {
-        'text-color': '#555555',
-        'text-halo-color': '#ffffff',
+        'text-color': '#30445C',
+        'text-halo-color': '#F8FAFC',
         'text-halo-width': 1,
       },
     },
@@ -214,8 +214,8 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
         'text-size': 12,
       },
       paint: {
-        'text-color': '#696969',
-        'text-halo-color': '#ffffff',
+        'text-color': '#41556D',
+        'text-halo-color': '#F8FAFC',
         'text-halo-width': 1,
       },
     },
@@ -233,8 +233,8 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
         'text-max-width': 8,
       },
       paint: {
-        'text-color': '#282828',
-        'text-halo-color': '#ffffff',
+        'text-color': '#0F243D',
+        'text-halo-color': '#F8FAFC',
         'text-halo-width': 1,
       },
     },
@@ -258,8 +258,8 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
         'text-max-width': 8,
       },
       paint: {
-        'text-color': '#454545',
-        'text-halo-color': '#ffffff',
+        'text-color': '#41556D',
+        'text-halo-color': '#F8FAFC',
         'text-halo-width': 1,
       },
     },
@@ -269,6 +269,42 @@ export const createOpenFreeMapLightStyle = (tileTemplate: string) => ({
 export const OPEN_FREE_MAP_LIGHT_STYLE = createOpenFreeMapLightStyle(
   OPEN_FREE_MAP_BOOTSTRAP_TILE_TEMPLATE
 );
+
+const DARK_LAYER_PAINT: Record<string, Record<string, string | number>> = {
+  'light-background': { 'background-color': '#061326' },
+  'light-park': { 'fill-color': '#0E3440' },
+  'light-landcover-wood': { 'fill-color': '#102F3A' },
+  'light-water': { 'fill-color': '#07182B' },
+  'light-waterway': { 'line-color': '#17496B' },
+  'light-buildings': { 'fill-color': '#102338', 'fill-outline-color': '#1C3550' },
+  'light-road-path': { 'line-color': '#29425C' },
+  'light-road-minor': { 'line-color': '#223850' },
+  'light-road-major-casing': { 'line-color': '#18314B' },
+  'light-road-major': { 'line-color': '#334F6E' },
+  'light-motorway-casing': { 'line-color': '#12253B' },
+  'light-motorway': { 'line-color': '#3B6389' },
+  'light-boundaries': { 'line-color': '#44607B', 'line-opacity': 0.7 },
+  'light-road-name-major': { 'text-color': '#DDEBFA', 'text-halo-color': '#13273D' },
+  'light-road-name-minor': { 'text-color': '#B5C9E0', 'text-halo-color': '#13273D' },
+  'light-place-city': { 'text-color': '#F1F6FC', 'text-halo-color': '#0D2035' },
+  'light-place-local': { 'text-color': '#C7D7E9', 'text-halo-color': '#0D2035' },
+};
+
+export const createOpenFreeMapDarkStyle = (style: object) => {
+  const lightStyle = style as {
+    layers: { id: string; paint?: Record<string, unknown>; [key: string]: unknown }[];
+    [key: string]: unknown;
+  };
+
+  return {
+    ...lightStyle,
+    layers: lightStyle.layers.map((layer) => ({
+      ...layer,
+      id: layer.id.replace(/^light-/, 'dark-'),
+      paint: { ...layer.paint, ...DARK_LAYER_PAINT[layer.id] },
+    })),
+  };
+};
 
 export const OPEN_STREET_MAP_FALLBACK_STYLE = {
   version: 8,
@@ -288,6 +324,20 @@ export const OPEN_STREET_MAP_FALLBACK_STYLE = {
       type: 'raster',
       source: 'osm-fallback',
       minzoom: 0,
+    },
+  ],
+};
+
+export const OPEN_STREET_MAP_DARK_FALLBACK_STYLE = {
+  ...OPEN_STREET_MAP_FALLBACK_STYLE,
+  layers: [
+    {
+      ...OPEN_STREET_MAP_FALLBACK_STYLE.layers[0],
+      paint: {
+        'raster-brightness-min': 0.04,
+        'raster-brightness-max': 0.42,
+        'raster-saturation': -0.6,
+      },
     },
   ],
 };

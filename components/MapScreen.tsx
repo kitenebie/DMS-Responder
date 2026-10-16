@@ -30,8 +30,10 @@ import { locationService, type LocationCoords } from './services/locationService
 import { useRouteStore } from './routeStore';
 import { Icon } from './Icon';
 import {
+  createOpenFreeMapDarkStyle,
   loadLatestOpenFreeMapLightStyle,
   OPEN_FREE_MAP_LIGHT_STYLE,
+  OPEN_STREET_MAP_DARK_FALLBACK_STYLE,
   OPEN_STREET_MAP_FALLBACK_STYLE,
 } from './mapStyles';
 
@@ -187,7 +189,6 @@ const OFF_ROUTE_THRESHOLD_M = 35;
 // How many consecutive off-route checks before actually rerouting (avoids GPS jitter false positives)
 const OFF_ROUTE_CONSECUTIVE_CHECKS = 3;
 const LOCATION_STATE_UPDATE_INTERVAL_MS = 200;
-const LOCATION_UPLOAD_INTERVAL_MS = 3_000;
 const HEADING_UPDATE_INTERVAL_MS = 150;
 const HEADING_IDLE_UPDATE_INTERVAL_MS = 1_000;
 
@@ -330,8 +331,6 @@ const MapScreen = memo(function MapScreen({
   const latestLocationRef = useRef<LocationCoords | null>(null);
   const lastLocationStateUpdateMsRef = useRef(0);
   const locationStateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastLocationUploadMsRef = useRef(0);
-  const locationUploadInFlightRef = useRef(false);
   const lastHeadingUpdateMsRef = useRef(0);
   const lastHeadingRef = useRef<number | null>(null);
 
@@ -532,8 +531,15 @@ const MapScreen = memo(function MapScreen({
   }, [normalizedIncident, userLocation]);
 
   const currentMapStyle = useMemo(
-    () => (useFallbackMapStyle ? OPEN_STREET_MAP_FALLBACK_STYLE : openFreeMapStyle),
-    [openFreeMapStyle, useFallbackMapStyle]
+    () =>
+      useFallbackMapStyle
+        ? isDarkMode
+          ? OPEN_STREET_MAP_DARK_FALLBACK_STYLE
+          : OPEN_STREET_MAP_FALLBACK_STYLE
+        : isDarkMode
+          ? createOpenFreeMapDarkStyle(openFreeMapStyle)
+          : openFreeMapStyle,
+    [isDarkMode, openFreeMapStyle, useFallbackMapStyle]
   );
 
   // Reset route state when destination changes (incident changes).
@@ -702,25 +708,6 @@ const MapScreen = memo(function MapScreen({
         });
         // Route/UI calculations do not need to run at raw emulator frequency.
         commitLocationState(nextLocation);
-
-        // Rate-limit network work and never queue overlapping requests.
-        const now = Date.now();
-        if (
-          typeof normalizedHeading === 'number' &&
-          !locationUploadInFlightRef.current &&
-          now - lastLocationUploadMsRef.current >= LOCATION_UPLOAD_INTERVAL_MS
-        ) {
-          lastLocationUploadMsRef.current = now;
-          locationUploadInFlightRef.current = true;
-          locationService
-            .sendLocationWithHeading({ latitude, longitude }, normalizedHeading)
-            .catch((error) => {
-              console.log('[MapScreen] Failed to send location with heading:', error);
-            })
-            .finally(() => {
-              locationUploadInFlightRef.current = false;
-            });
-        }
       }
     },
     [commitLocationState, isValidHeading]

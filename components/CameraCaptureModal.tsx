@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Icon } from './Icon';
+import { getTheme } from '../src/utils';
 
 interface CameraCaptureModalProps {
   visible: boolean;
@@ -44,12 +45,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     }
   };
 
-  const theme = {
-    background: isDarkMode ? '#0F172A' : '#F8FAFC',
-    surface: isDarkMode ? '#1E293B' : '#FFFFFF',
-    text: isDarkMode ? '#F8FAFC' : '#0F172A',
-    textSecondary: isDarkMode ? '#94A3B8' : '#475569',
-  };
+  const theme = getTheme(isDarkMode);
 
   return (
     <Modal visible={visible} transparent={false} animationType="slide">

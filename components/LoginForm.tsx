@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   View,
   Text,
+  StatusBar,
   TouchableOpacity,
   TextInput,
   StyleSheet,
@@ -11,8 +12,10 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Icon } from './Icon';
-import { login, saveCredentials } from './lib/auth';
+import { login } from './lib/auth';
+import { getTheme } from '../src/utils';
 
 interface LoginFormProps {
   onLogin: (userData: any) => void;
@@ -26,12 +29,7 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
   const [showPassword, setShowPassword] = useState(false);
 
   const theme = {
-    background: isDarkMode ? '#0F172A' : '#F8FAFC',
-    surface: isDarkMode ? '#1E293B' : '#FFFFFF',
-    surfaceAlt: isDarkMode ? '#334155' : '#E2E8F0',
-    text: isDarkMode ? '#F8FAFC' : '#0F172A',
-    textSecondary: isDarkMode ? '#94A3B8' : '#475569',
-    border: isDarkMode ? '#334155' : '#E2E8F0',
+    ...getTheme(isDarkMode),
     primary: '#3B82F6',
     primaryDark: '#2563EB',
     error: isDarkMode ? '#EF4444' : '#DC2626',
@@ -46,8 +44,8 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
     setIsLoading(true);
     
     try {
-      const userData = await login(email, password);
-      await saveCredentials(email, password); // Save credentials for auto-login
+      const userData = await login(email, password, true);
+      await AsyncStorage.removeItem('credentials').catch(() => {});
       onLogin(userData);
     } catch (error: any) {
       Alert.alert('Login Failed', error.message || 'An error occurred during login');
@@ -58,6 +56,10 @@ export const LoginForm = ({ onLogin, isDarkMode }: LoginFormProps) => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}>

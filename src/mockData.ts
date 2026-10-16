@@ -136,13 +136,9 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
     const parsedUser = await getStoredUser();
 
     if (parsedUser) {
-      console.log('user data stored:', parsedUser.user);
-
       // Make API call and properly return the transformed data
       const response = await api.get(`/responder/report/${parsedUser.user.unit_id}`);
       const reportDetails = response.data.reportDetails;
-      console.log(`incoming report ${JSON.stringify(reportDetails)}`);
-      console.log(`Status report ${response.data.is_accepted}`);
 
       // FIX: get first item from array
       const report = Array.isArray(reportDetails) ? reportDetails[0] : reportDetails;
@@ -195,7 +191,7 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
         icon: 'warning',
 
         report_attachment: report?.image_path ? `${ip}/storage/${report.image_path}` : '',
-        isAccepted: response.data.is_accepted || false,
+        isAccepted: parseBooleanFlag(response.data.is_accepted) ?? false,
         receiver_id: report?.receiver_id ?? report?.user_id ?? report?.operator_id ?? null,
         dispatcher_id: report?.operator_id ?? report?.dispatcher_id ?? null,
         citizen_id: report?.user_id ?? null,
@@ -221,25 +217,8 @@ export const fetchIncomingIncident = async (): Promise<Incident> => {
       citizen_id: null,
     };
   } catch (error) {
-    console.log('Error fetching incident:', error);
-
-    return {
-      id: 'Unknown',
-      type: 'Unknown',
-      location: 'Unknown',
-      coordinates: { lat: 0, lng: 0 },
-      timeReported: new Date().toISOString(),
-      description: '',
-      priority: '',
-      caller: 'Unknown',
-      callerPhone: '',
-      icon: 'warning',
-      report_attachment: '',
-      isAccepted: false,
-      receiver_id: null,
-      dispatcher_id: null,
-      citizen_id: null,
-    };
+    console.warn('Error fetching incident:', error);
+    throw error;
   }
 };
 
@@ -296,12 +275,7 @@ export const fetchHistoricalIncidents = async (
     };
   } catch (error: any) {
     console.error('Error fetching historical incidents:', error.response?.data || error.message);
-    return {
-      items: [],
-      total: 0,
-      hasMore: false,
-      nextOffset: null,
-    };
+    throw error;
   }
 };
 
@@ -503,13 +477,13 @@ export const DEFAULT_CONFIG: AppConfig = {
 
 export const THEMES: Record<string, Theme> = {
   dark: {
-    background: '#0F172A',
-    surface: '#1E293B',
-    surfaceAlt: '#334155',
+    background: '#061326',
+    surface: '#0A1B33',
+    surfaceAlt: '#12315A',
     text: '#F8FAFC',
-    textSecondary: '#94A3B8',
-    border: '#334155',
-    mapBg: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+    textSecondary: '#91A9CC',
+    border: '#174B86',
+    mapBg: 'linear-gradient(135deg, #061326 0%, #0A1B33 50%, #12315A 100%)',
   },
   light: {
     background: '#F8FAFC',
@@ -517,7 +491,7 @@ export const THEMES: Record<string, Theme> = {
     surfaceAlt: '#E2E8F0',
     text: '#0F172A',
     textSecondary: '#475569',
-    border: '#CBD5E1',
+    border: '#E2E8F0',
     mapBg: 'linear-gradient(135deg, #E0E7FF 0%, #DBEAFE 50%, #BFDBFE 100%)',
   },
 };
