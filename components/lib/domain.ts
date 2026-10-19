@@ -1,1 +1,1 @@
-export const ip = 'https://earms.online';
+export { getApiBaseUrl, ip } from '../../lib/Domain';

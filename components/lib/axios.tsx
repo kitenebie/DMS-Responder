@@ -1,6 +1,6 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ip } from './domain';
+import { getApiBaseUrl, ip } from './domain';
 import { ReportForm } from '@/types';
 
 const api = axios.create({
@@ -16,6 +16,7 @@ const api = axios.create({
 // Request interceptor to add authentication token
 api.interceptors.request.use(
   async (config) => {
+    config.baseURL = await getApiBaseUrl();
     try {
       const userData = await AsyncStorage.getItem('user');
       if (userData) {

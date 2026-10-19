@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { OPEN_ROUTE_SERVICE_API_KEY } from '../src/config/maps';
+import { OSRM_BASE_URL } from '../src/config/route';
 
 interface RouteGeometry {
   type: 'LineString';
@@ -119,7 +120,7 @@ const requestOsrmRoute = async (
   profile: 'driving' | 'foot'
 ): Promise<CachedRoute> => {
   const osrmProfile = profile === 'foot' ? 'foot' : 'driving';
-  const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${params.userLng},${params.userLat};${params.destLng},${params.destLat}?overview=full&geometries=geojson&steps=true`;
+  const url = `${OSRM_BASE_URL}/${osrmProfile}/${params.userLng},${params.userLat};${params.destLng},${params.destLat}?overview=full&geometries=geojson&steps=true`;
   const response = await fetch(url, { headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`OSRM route request failed: ${response.status}`);
 

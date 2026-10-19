@@ -2,6 +2,7 @@
 import { api } from 'components/lib/axios';
 import { getStoredUser } from 'components/lib/auth';
 import { MapMarker, MapShape, MapShapeType } from 'react-native-leaflet-view';
+import { OSRM_BASE_URL } from '../../src/config/route';
 
 export interface GeofenceData {
   IrosinBoundery: [number, number][];
@@ -428,7 +429,7 @@ class MapService {
     return this.retryWithBackoff(
       async () => {
         try {
-          const url = `https://router.project-osrm.org/route/v1/driving/${from.longitude},${from.latitude};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+          const url = `${OSRM_BASE_URL}/driving/${from.longitude},${from.latitude};${to.lng},${to.lat}?overview=full&geometries=geojson`;
 
           const response = await fetch(url, {
             method: 'GET',

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules, Platform } from 'react-native';
-import { ip } from '../lib/domain';
+import { getApiBaseUrl } from '../lib/domain';
 
 type OverlayStatus = 'started' | 'permission_missing' | 'unavailable' | 'error';
 
@@ -96,7 +96,7 @@ export const startOverlayLocationService = async (): Promise<OverlayStatus> => {
     console.log('[OverlayLocation] Starting authenticated location service.');
 
     await overlayModule!.startOverlay({
-      baseUrl: ip,
+      baseUrl: await getApiBaseUrl(),
       token: config.token,
     });
     return 'started';
