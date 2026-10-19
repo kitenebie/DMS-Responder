@@ -1166,7 +1166,7 @@ const AppContent = () => {
     );
   }
 
-  // Show loading screen if logged in but location has not successfully synced to Firebase yet
+  // Show the loading screen until the device returns its first location.
   if (isLoggedIn && !isLocationSynced) {
     return (
       <ThemeProvider>
@@ -1184,7 +1184,7 @@ const AppContent = () => {
               marginTop: 16,
               fontWeight: 'bold',
             }}>
-            Syncing location to Firebase...
+            Getting current location...
           </Text>
         </View>
       </ThemeProvider>
